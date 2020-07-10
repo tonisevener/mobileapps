@@ -7,7 +7,7 @@ const server = require('../../utils/server.js');
 
 describe('mobile-html', function() {
 
-    this.timeout(20000); // eslint-disable-line no-invalid-this
+    this.timeout(20000);
 
     before(() => server.start());
 
@@ -42,16 +42,40 @@ describe('mobile-html', function() {
         .then((res) => {
             const document = domino.createDocument(res.body);
             const section0 = document.querySelector('section[data-mw-section-id=0]');
-            assert.ok(section0.children[0].outerHTML.startsWith('<p>The <b>domestic dog</b>'));
+            // children[0] edit button
+            // children[1] 1st hatnote
+            // TODO: it should actually come even later since there are two hatnotes
+            // associated with this revision. This is not a regression by this patch.
+            assert.ok(section0.children[2].outerHTML.startsWith('<p>The <b>domestic dog</b>'));
         });
     });
 
     it('mobile-html should not have navboxes', () => {
-        const uri = localUri('Cat/884971700');
+        const uri = localUri('Cat');
         return preq.get({ uri })
         .then((res) => {
             const document = domino.createDocument(res.body);
             assert.selectorDoesNotExist(document, 'div.navbox', 'Document contain navboxes');
+        });
+    });
+
+    it('mobile-html should have meta tags indicating page protection', () => {
+        const uri = localUri('Elmo/916610952', 'en.wikipedia.org');
+        return preq.get(uri).then((res) => {
+            const document = domino.createDocument(res.body);
+            const edit = document.querySelector('meta[property=mw:pageProtection:edit]');
+            assert.deepEqual(edit.getAttribute('content'), 'autoconfirmed');
+            const move = document.querySelector('meta[property=mw:pageProtection:move]');
+            assert.deepEqual(move.getAttribute('content'), 'sysop');
+        });
+    });
+
+    it('mobile-html from mobileview should have meta tags indicating page protection', () => {
+        const uri = localUri('%E9%97%87%E5%BD%B1%E4%B9%8B%E5%BF%83/54664518', 'zh.wikipedia.org');
+        return preq.get(uri).then((res) => {
+            const document = domino.createDocument(res.body);
+            const meta = document.querySelector('meta[property=mw:pageProtection:edit]');
+            assert.deepEqual(meta.getAttribute('content'), 'autoconfirmed');
         });
     });
 

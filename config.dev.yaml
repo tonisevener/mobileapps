@@ -10,7 +10,9 @@ worker_heap_limit_mb: 250
 # Logger info
 logging:
   level: trace
-#  streams:
+  streams:
+  - type: stdout # log to stdout
+    named_levels: true # emit log level name instead of index. e.g. INFO vs 30
 #  # Use gelf-stream -> logstash
 #  - type: gelf
 #    host: logstash1003.eqiad.wmnet
@@ -30,11 +32,11 @@ services:
     # version: ^0.4.0
     # per-service config
     conf:
-      port: 6927
+      port: 8888
       # interface: localhost # uncomment to only listen on localhost
       # more per-service config settings
       # the location of the spec, defaults to spec.yaml if not specified
-      # spec: ./spec.yaml
+      # spec: ./spec.template.yaml
       # allow cross-domain requests to the API (default '*')
       cors: '*'
       # to disable use:
@@ -43,6 +45,16 @@ services:
       # cors: restricted.domain.org
       # content for the CSP headers
       # csp: false  # uncomment this line to disable sending them
+      # CSP for mobile-html
+      mobile_html_csp: "default-src 'none';
+        connect-src https://*.wikipedia.org 'self';
+        media-src upload.wikimedia.org 'self';
+        img-src *.wikimedia.org wikimedia.org *.wikipedia.org wikipedia.org 'self' data:;
+        object-src 'none';
+        script-src 'self' 'unsafe-inline';
+        style-src *.wikipedia.org 'self' 'unsafe-inline';
+        frame-ancestors 'self'
+        "
       # URL of the outbound proxy to use (complete with protocol)
       # proxy: http://my.proxy.org:8080
       # the list of domains for which not to use the proxy defined above
@@ -60,9 +72,13 @@ services:
       #   - user-agent
       #   - x-request-id
       # the user agent to use when issuing requests
-      mobile_html_rest_api_base_uri: "//localhost:6927/api/v1/"
-      mobile_html_csp: "default-src 'none'; media-src *; img-src * data:; script-src app://localhost:6927 http://localhost:6927 'self' 'unsafe-inline'; style-src app://localhost http://localhost app://*.wikipedia.org http://*.wikipedia.org 'self' 'unsafe-inline'; frame-ancestors 'self'"
       user_agent: WMF Mobile Content Service dev
+      # REST API base URIs
+      use_request_host: true
+      mobile_html_rest_api_base_uri: '//{{host}}/api/v1/'
+      mobile_html_local_rest_api_base_uri_template: '//{{host}}/{{domain}}/v1/'
+      # max JSON POST body size limit
+      # max_body_size: 100kb
       # the template used for contacting the MW API
       mwapi_req:
         method: post

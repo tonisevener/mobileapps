@@ -1,0 +1,75 @@
+openapi: 3.0.1
+
+info:
+  version: 0.3.0
+  title: WMF MobileApps service
+  description: |
+    (aka Mobile Content Service and Page Content Service).
+    A collection of REST API services supporting Wikimedia Foundation (WMF) Readers products.
+    https://www.mediawiki.org/wiki/Wikimedia_Apps/Team/RESTBase_services_for_apps
+  termsOfService: https://wikimediafoundation.org/wiki/Terms_of_Use
+  contact:
+    name: the Wikimedia Foundation Reading Infrastructure team.
+    url: https://www.mediawiki.org/wiki/Wikimedia_Reading_Infrastructure_team
+  license:
+    name: Apache2
+    url: http://www.apache.org/licenses/LICENSE-2.0
+
+x-default-params:
+  domain: en.wikipedia.org
+
+paths:
+  # from routes/root.js
+  /robots.txt:
+    get:
+      tags:
+        - Root
+      description: Gets robots.txt
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: "#/components/responses/problem"
+      x-monitor: false
+
+  /:
+    get:
+      tags:
+        - Root
+      description: The root service end-point
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: "#/components/responses/problem"
+      x-amples:
+        - title: spec from root
+          request:
+            query:
+              spec: true
+          response:
+            status: 200
+
+  # from routes/info.js
+  /_info:
+    get:
+      tags:
+        - Root
+      description: Gets information about the service.
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: "#/components/responses/problem"
+      x-amples:
+        - title: retrieve service info
+          request: {}
+          response:
+            status: 200
+            headers:
+              content-type: application/json
+            body:
+              name: /.+/
+              description: /.+/
+              version: /.+/
+              home: /.+/

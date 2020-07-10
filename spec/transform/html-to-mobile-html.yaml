@@ -1,0 +1,46 @@
+paths:
+  /{domain}/v1/transform/html/to/mobile-html/{title}:
+    post:
+      tags:
+        - Page content
+      summary: Create HTML optimized for mobile consumption based on POSTed Parsoid HTML
+      description: |
+        Creates HTML optimized for mobile consumption for the given page based on the POSTed
+        Parsoid HTML in the request body. The result can be used as a preview of potential wikitext
+        changes if `output-mode` header is sent as `editPreview` - that removes page headers (article
+        title and description) and edit UI elements (edit pencils, etc.), and has no collapsed sections.
+      parameters:
+        - $ref: '#/components/parameters/domainParam'
+        - $ref: '#/components/parameters/title'
+        - in: body
+          name: html
+          required: true
+          schema:
+            type: string
+        - name: output-mode
+          in: header
+          description: Output mode for mobile-html. Default is `editPreview`.
+          required: false
+          schema:
+            type: string
+            enum:
+              - editPreview
+              - contentAndReferences
+              - content
+              - references
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: '#/components/responses/problem'
+      x-amples:
+        - title: Get preview mobile HTML for test page
+          request:
+            params:
+              title: Dog
+            body:
+              html: <section>test</section>
+          response:
+            status: 200
+            headers:
+              content-type: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.2.1"

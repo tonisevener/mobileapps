@@ -1,0 +1,32 @@
+@import './Themes.less';
+@import './Constants.less';
+
+.pcs-footer-section a:hover {
+  text-decoration: none;
+}
+
+#pcs-footer-container-menu,
+#pcs-footer-container-readmore {
+  margin-bottom: 0;
+}
+
+h2#pcs-footer-container-readmore-heading,
+h2#pcs-footer-container-menu-heading {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 12pt;
+  color: var(--footer-heading-text-color);
+  border-top: 0.5px solid var(--border-color);
+  border-bottom: 0.5px solid var(--border-color);
+  font-family: @font-family-system-sans;
+  background-color: var(--mid-background);
+  margin: 0 calc(50% - 50vw);
+  padding: 1.5em calc(50vw - 50%) 0.5em calc(50vw - 50%);
+}
+
+section#pcs-footer-container-legal {
+  background-color: var(--mid-background);
+  border-top: 0.5px solid var(--border-color);
+  margin: 0 calc(50% - 50vw);
+  padding: .5em calc(50vw - 50%);
+}

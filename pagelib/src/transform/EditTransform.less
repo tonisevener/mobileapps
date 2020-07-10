@@ -1,0 +1,161 @@
+@import './Themes.less';
+@import './Constants.less';
+
+.pcs-edit-section-header {
+  display: flex;
+  align-items: flex-end;
+}
+
+.pcs-edit-section-header.v2 {
+  align-items: flex-start;
+}
+
+.pcs-edit-section-title {
+  flex: 1;
+}
+
+#pcs-edit-section-title-pronunciation {
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAdhwAAHYcBj+XxZQAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAI4SURBVGiB7Zm/ThRRFIc/SZYYCleRhGBlCEFjoq0J/kEDlRieAAqfwvbUxsYnUKMvIUowsEgwVNhAqEysLIwW0gA7FpMJcDhn7+7s/DPMl2xx795z8/1m9t7JnYWampqa88Yz4GrZEv0QAYfAMjBfsksQMfoi9dkEHhfo1DVCLKjRASKgDbwCBouSCyEcy2la2CEiYJ0KrA/htJTFTeAN8ZXXIbaAZt6SHmIIdeIusGvUtICLuVk6iCESCgBwBfhg1L3MxdJBDIFuAwA0gCVVdwRMZy1qIfjyVoALzjxNYEfVfuswPhOEzvJWgFVg0pnvPvGVP1k/l6nxCYSwvPcc+AM8dOZ9reo/pxXsRi5tgCSEdSduc3p7bQPXqhgg2S4t1tS4RU9yoLdMmXMPmDX6l1R7xpug7AAAC0bfqmrf8IqrEGDK6Puu2qNpJi5iDUTAvjFmSI3560lW4Q5YIbVX2yuuQoAfRt+Iav/0iqsQ4IvRd121Kx3gvdGnn9K7aSYuYhHr7TJBn9qsrbb0AL+BCeP7O6q+DYylCRBCSB/gF/b+D/BW1a9kKa0Reg+wDIw78z3g7Dn5SabGBkJvATwuc/ZAs03OB5qE5/QXYBD4qOqOiO9IYQjpAgwDn4y6F7lYBhBDpBNTwJ5Rs0YJr1UShHCAW8A77BdbX4FLuVsGEPwA69g/teTBNlyMYphkYWss8eTlbqMwuy4Ro0/LbwCPilPqnwg4IN42n5bskor//i+mmpqammP+AebGbBiuYyfiAAAAAElFTkSuQmCC");
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: var(--edit-section-link-container-opacity);
+  margin: auto 0.35em 0.1em 0.35em;
+  display: inline-block;
+  background-size: contain;
+  width: 0.8em;
+  height: 0.8em;
+  vertical-align: middle;
+  .darkThemesOnly({
+    -webkit-filter: invert(100%);
+    filter: invert(100%);
+  });
+}
+
+html[dir="rtl"] #pcs-edit-section-title-pronunciation {
+  -webkit-transform: scaleX( -1 );
+  transform: scaleX( -1 );
+}
+
+#mainpage a.pcs-edit-section-link,
+.no-editing a.pcs-edit-section-link,
+.no-editing #pcs-edit-section-add-title-description {
+  display: none;
+}
+
+.pcs-edit-section-link-container {
+  margin: 0px 0px 0px 16px;
+  opacity: var(--edit-section-link-container-opacity);
+
+  .darkThemesOnly({
+    -webkit-filter: invert(100%);
+    filter: invert(100%);
+  });
+}
+
+section[data-mw-section-id="0"] .pcs-edit-section-link-container {
+  float: right;
+}
+
+html[dir='rtl'] section[data-mw-section-id="0"] .pcs-edit-section-link-container,
+body[dir='rtl'] section[data-mw-section-id="0"] .pcs-edit-section-link-container,
+.mw-content-rtl section[data-mw-section-id="0"] .pcs-edit-section-link-container {
+  float: left;
+}
+
+h2 + .pcs-edit-section-link-container {
+	margin-bottom: 8px;
+}
+
+.mw-content-rtl .pcs-edit-section-link-container {
+  -webkit-transform: scaleX( -1 );
+  transform: scaleX( -1 );
+  margin: 0px 16px 0px 0px;
+}
+
+a.pcs-edit-section-link {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  background-size: 24px 24px;
+  background-repeat: no-repeat;
+  background-image: var(--edit-section-icon);
+}
+
+.pcs-edit-section-header.v2 a.pcs-edit-section-link {
+  margin-top: 0.85em;
+}
+
+.page-protected a.pcs-edit-section-link {
+  background-image: var(--edit-section-page-protected-icon);
+}
+
+.pcs-platform-android a.pcs-edit-section-link:active {
+  background-color: transparent;
+}
+
+.pcs-platform-android a.pcs-edit-section-link:before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+   -webkit-transform: scale( 0 );
+  transform: scale( 0 );
+  -webkit-transition: transform 300ms cubic-bezier( 0.25, 0.46, 0.45, 0.94 );
+  transition: transform 300ms cubic-bezier( 0.25, 0.46, 0.45, 0.94 ); /* ease out quad */
+}
+
+.pcs-platform-android a.pcs-edit-section-link:active:before {
+  width: 200%;
+  height: 200%;
+  top: -50%;
+  left: -50%;
+  background-color: var(--android-active-edit-link-background);
+  -webkit-transform: scale( 0.6 );
+  transform: scale( 0.6 );
+}
+
+.pcs-platform-ios h3.pcs-edit-section-title + span.pcs-edit-section-link-container,
+.pcs-platform-ios h4.pcs-edit-section-title + span.pcs-edit-section-link-container,
+.pcs-platform-ios h5.pcs-edit-section-title + span.pcs-edit-section-link-container,
+.pcs-platform-ios h6.pcs-edit-section-title + span.pcs-edit-section-link-container {
+    display: none;
+}
+
+/* Wikidata description styling */
+#pcs-edit-section-title-description {
+    font-size: 0.875em;
+    line-height: 1.375em;
+    color: var(--secondary-text-color);
+    margin-top: 0.136em;
+    margin-bottom: 0.227em;
+    padding-bottom: 0px;
+}
+
+#pcs-edit-section-add-title-description {
+    font-size: 0.875em;
+    font-weight: 400;
+    display: inline;
+}
+
+#pcs-edit-section-add-title-description:before {
+    content: "";
+    background-image: var(--plus-icon);
+    background-repeat: no-repeat;
+    width: 1.25em;
+    height: 0.75em;
+    background-size: 0.75em 0.75em;
+    display: inline-block;
+    background-position: left center;
+}
+
+html[dir="rtl"] #pcs-edit-section-add-title-description:before {
+    -webkit-transform: scaleX( -1 );
+    transform: scaleX(-1);
+}
+
+/* Horizontal divider between title/description and lead section text */
+#pcs-edit-section-divider {
+    margin: 12px 0px 16px 0px;
+    width: 60px;
+}

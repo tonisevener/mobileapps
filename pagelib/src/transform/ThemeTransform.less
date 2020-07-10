@@ -1,0 +1,144 @@
+@import './Constants.less';
+@import './Themes.less';
+/*
+The styles referred to as 'baseline' in the comments below are critical because they ensure
+a theme colors are more universally applied even by elements colored via inline styles. These are
+particularly difficult to theme otherwise. We can build on top of, so to speak, these baseline
+styles with only the things which need tweaking.
+
+**IMPORTANT** Refrain from adding CSS classes from user generated content here to fix themeing issues.
+These issues should be fixed by adding the "notheme" class to the elements that have an explicit
+background color or should otherwise be excluded from themeing. More information about this can
+be found here: https://phabricator.wikimedia.org/T236137
+*/
+
+/* baseline */
+
+.nonDefaultThemes({
+  color: var(--primary-text-color);
+  background: var(--paper-background);
+});
+
+.notheme {
+  color: @wmui-color-base0;
+}
+
+a.notheme {
+  color: @wmui-color-accent50;
+}
+
+/* baseline anchor */
+a:not(.notheme) {
+  .nonDefaultThemes({
+    color: var(--link-color);
+  });
+}
+
+/* External link -- LTR */
+.mw-parser-output a.external {
+  background-image: var(--external-link-icon);
+}
+
+/* External link -- RTL */
+body[dir='rtl'] .mw-parser-output a.external {
+  background-image: var(--rtl-external-link-icon);
+}
+
+/* baseline mid background */
+table:not(.notheme),
+td:not(.notheme),
+tr:not(.notheme),
+th:not(.notheme),
+// TODO - Should this line have the :not(.notheme) the other lines have?
+li.gallerybox div.thumb,
+// These selectors are more specific versions of the more general selectors above
+// in order to properly overwrite the base theme selector '.content table.infobox td'.
+// With theme attached, these have the same specificity as the base theme (0, 2, 2).
+table td:not(.notheme),
+table th:not(.notheme) {
+  .nonDefaultThemes({
+    background: var(--mid-background);
+    color: var(--primary-text-color);
+    border-color: var(--border-color);
+  });
+}
+
+/* baseline div, span, ul, li */
+div:not(.notheme),
+span:not(.notheme),
+ul:not(.notheme),
+ol:not(.notheme),
+li:not(.notheme) {
+  .nonDefaultThemes({
+    background-color: inherit;
+    color: var(--primary-text-color);
+    border-color: var(--border-color);
+  });
+}
+
+/* quotebox and blockquote */
+/* en > Audioslave > 793042679 */
+/* es > Arte > 100819823 */
+blockquote:not(.notheme),
+div.quotebox :not(.notheme) {
+  .nonDefaultThemes({
+    background: var(--card-background);
+  });
+}
+
+hr:not(.notheme) {
+  border: none;
+  height: 1px;
+  background-color: var(--border-color);
+}
+
+/* figcaption color */
+figcaption:not(.notheme) {
+  color: var(--secondary-text-color);
+}
+
+/* caption background */
+caption:not(.notheme) {
+  .nonDefaultThemes({
+    background: var(--caption-background);
+  });
+}
+
+/* images */
+/* compatibility transform */
+img.mwe-math-fallback-image-inline {
+  .darkThemesOnly({
+    background: @wmui-color-base70;
+    padding: 2px;
+  }, true);
+}
+
+/* en > Quadratic equation > 793685454 */
+img.mwe-math-fallback-image-inline:not(.notheme) {
+  .darkThemesOnly({
+    -webkit-filter: invert(100%);
+    filter: invert(100%);
+  });
+}
+
+.pcs-element-highlight {
+  background-color: @wmui-color-yellow50 !important;
+  color: @wmui-color-base0 !important;
+  border-radius: 2px !important;
+}
+
+#pcs .dablink,
+#pcs .hatnote,
+#pcs .rellink {
+    padding: 5px 0;
+    color: var(--secondary-text-color);
+    font-size: .875em;
+    background-color: initial;
+    margin-bottom: 1px;
+    overflow: hidden;
+    font-style: italic;
+}
+
+.mw-highlight {
+  background-color: var(--mid-background);
+}

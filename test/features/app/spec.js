@@ -1,24 +1,19 @@
-/* global describe, it, before, after */
+/* eslint-disable no-multiple-empty-lines */
 
 'use strict';
 
-const preq   = require('preq');
-const assert = require('../../utils/assert.js');
-const server = require('../../utils/server.js');
-const URI    = require('swagger-router').URI;
-const yaml   = require('js-yaml');
-const fs     = require('fs');
+const preq                   = require('preq');
+const refParser              = require('json-schema-ref-parser-sync');
+const assert                 = require('../../utils/assert.js');
+const server                 = require('../../utils/server.js');
+const URI                    = require('swagger-router').URI;
+const specLib                = require('../../../lib/spec.js');
+const OpenAPISchemaValidator = require('openapi-schema-validator').default;
 
-const dateUtil = require('../../../lib/dateUtil');
-const pad = dateUtil.pad;
+const validator = new OpenAPISchemaValidator({ version: 3 });
 const Ajv    = require('ajv');
 
 const baseUri = `${server.config.uri}en.wikipedia.org/v1/`;
-const d1 = new Date();
-const d2 = new Date(Date.now() - 2 * dateUtil.ONE_DAY);
-const dateStr1 = `${d1.getUTCFullYear()}/${pad(d1.getUTCMonth() + 1)}/${pad(d1.getUTCDate())}`;
-const monthDayStr1 = `${pad(d1.getUTCMonth() + 1)}/${pad(d1.getUTCDate())}`;
-const dateStr2 = `${d2.getUTCFullYear()}/${pad(d2.getUTCMonth() + 1)}/${pad(d2.getUTCDate())}`;
 
 if (!server.stopHookAdded) {
     server.stopHookAdded = true;
@@ -27,19 +22,17 @@ if (!server.stopHookAdded) {
 
 function staticSpecLoad() {
 
-    let spec;
     const myService = server.config.conf.services[server.config.conf.services.length - 1].conf;
-    const specPath = `${__dirname}/../../../${myService.spec ? myService.spec : 'spec.yaml'}`;
+    const specPath = `${__dirname}/../../../${myService.spec ? myService.spec : 'spec'}`;
 
-    try {
-        spec = yaml.safeLoad(fs.readFileSync(specPath));
-    } catch (e) {
-        // this error will be detected later, so ignore it
-        spec = { paths: {}, 'x-default-params': {} };
-    }
-
-    return spec;
-
+    return refParser.dereference(specLib.load(specPath, {}), function (err, schema) {
+        if (err) {
+            // this error will be detected later, so ignore it
+            return { paths: {}, 'x-default-params': {} };
+        } else {
+            return schema;
+        }
+    });
 }
 
 function validateExamples(pathStr, defParams, mSpec) {
@@ -98,6 +91,7 @@ function constructTestCase(title, path, method, request, response) {
 
 }
 
+
 function constructTests(paths, defParams) {
 
     const ret = [];
@@ -123,7 +117,11 @@ function constructTests(paths, defParams) {
                 ex.request = ex.request || {};
                 ret.push(constructTestCase(
                     ex.title,
-                    uri.toString({ params: Object.assign({}, defParams, ex.request.params || {}) }),
+                    uri.toString({
+                        params: Object.assign({},
+                        defParams,
+                        ex.request.params || {})
+                    }),
                     method,
                     ex.request,
                     ex.response || {}
@@ -135,6 +133,7 @@ function constructTests(paths, defParams) {
     return ret;
 
 }
+
 
 function cmp(result, expected, errMsg) {
 
@@ -192,6 +191,7 @@ function cmp(result, expected, errMsg) {
 
 }
 
+
 function validateTestResponse(testCase, res) {
 
     const expRes = testCase.response;
@@ -234,14 +234,15 @@ function validateTestResponse(testCase, res) {
 
 }
 
+
 describe('Swagger spec', function() {
 
     // the variable holding the spec
-    let spec = staticSpecLoad();
+    const spec = staticSpecLoad();
     // default params, if given
     let defParams = spec['x-default-params'] || {};
 
-    this.timeout(20000); // eslint-disable-line no-invalid-this
+    this.timeout(20000);
 
     before(() => {
         return server.start();
@@ -253,7 +254,7 @@ describe('Swagger spec', function() {
             assert.status(200);
             assert.contentType(res, 'application/json');
             assert.notDeepEqual(res.body, undefined, 'No body received!');
-            spec = res.body;
+            assert.deepEqual({ errors: [] }, validator.validate(res.body), 'Spec must have no validation errors');
         });
     });
 
@@ -262,7 +263,7 @@ describe('Swagger spec', function() {
             defParams = spec['x-default-params'];
         }
         // check the high-level attributes
-        ['info', 'swagger', 'paths'].forEach((prop) => {
+        ['info', 'openapi', 'paths'].forEach((prop) => {
             assert.deepEqual(!!spec[prop], true, `No ${prop} field present!`);
         });
         // no paths - no love
@@ -294,129 +295,25 @@ describe('Swagger spec', function() {
             });
         };
 
-        const assertValidSchemaAggregated = (uri) => {
-            return preq.get({ uri, query: { aggregated: true } })
-            .then((res) => {
-                if (res.body) {
-                    throw new assert.AssertionError({ message: 'Response should be empty!' });
-                }
-            });
-        };
-
-        const assertBadRequest = (uri) => {
-            return preq.get({ uri })
-            .then((res) => {
-                assert.fail('This request should fail!');
-            })
-            .catch((err) => {
-                if (!ajv.validate('#/definitions/problem', err.body)) {
-                    throw new assert.AssertionError({ message: ajv.errorsText() });
-                }
-            });
-        };
-
-        Object.keys(spec.definitions).forEach((defName) => {
-            ajv.addSchema(spec.definitions[defName], `#/definitions/${defName}`);
-        });
-
-        // Valid non-aggregated requests
-
-        it('featured article response should conform to schema', () => {
-            const uri = `${baseUri}page/featured/${dateStr1}`;
-            return assertValidSchema(uri, '#/definitions/article_summary_merge_link');
-        });
-
-        it('featured image response should conform to schema', () => {
-            const uri = `${baseUri}media/image/featured/${dateStr1}`;
-            return assertValidSchema(uri, '#/definitions/image');
-        });
-
-        it('most-read response should conform to schema', () => {
-            const uri = `${baseUri}page/most-read/${dateStr2}`;
-            return assertValidSchema(uri, '#/definitions/mostread');
-        });
-
-        it('news response should conform to schema', () => {
-            const uri = `${baseUri}page/news`;
-            return assertValidSchema(uri, '#/definitions/news');
-        });
-
-        it('random response should conform to schema', () => {
-            const uri = `${baseUri}page/random/title`;
-            return assertValidSchema(uri, '#/definitions/random');
-        });
-
-        it('announcements should conform to schema', () => {
-            const uri = `${baseUri}feed/announcements`;
-            return assertValidSchema(uri, '#/definitions/announcements');
-        });
-
-        it('onthisday response should conform to schema', () => {
-            const uri = `${baseUri}feed/onthisday/all/${monthDayStr1}`;
-            return assertValidSchema(uri, '#/definitions/onthisdayResponse');
+        Object.keys(spec.components.schemas).forEach((defName) => {
+            ajv.addSchema(spec.components.schemas[defName], `#/components/schemas/${defName}`);
         });
 
         it('summary response should conform to schema', () => {
             const uri = `${baseUri}page/summary/Dubai/808803658`;
-            return assertValidSchema(uri, '#/definitions/summary');
+            return assertValidSchema(uri, '#/components/schemas/summary');
         });
 
         it('metadata response should conform to schema', () => {
             const uri = `${baseUri}page/metadata/Hummingbird`;
-            return assertValidSchema(uri, '#/definitions/metadata');
+            return assertValidSchema(uri, '#/components/schemas/metadata');
         });
 
-        it('media response should conform to schema', () => {
-            const uri = `${baseUri}page/media/Hummingbird`;
-            return assertValidSchema(uri, '#/definitions/media_list');
+        it('media-list response should conform to schema', () => {
+            const uri = `${baseUri}page/media-list/Hummingbird`;
+            return assertValidSchema(uri, '#/components/schemas/media_list');
         });
 
-        it('references response should conform to schema', () => {
-            const uri = `${baseUri}page/references/List_of_highest-grossing_Indian_films`;
-            return assertValidSchema(uri, '#/definitions/references_response');
-        });
-
-        // Bad requests return empty response for aggregated=true
-
-        it('featured article response should conform to schema (invalid lang, agg=true)', () => {
-            const uri = `${server.config.uri}is.wikipedia.org/v1/page/featured/${dateStr1}`;
-            return assertValidSchemaAggregated(uri);
-        });
-
-        it('featured image response should conform to schema (invalid date, agg=true)', () => {
-            const uri = `${baseUri}media/image/featured/2004/01/01`;
-            return assertValidSchemaAggregated(uri);
-        });
-
-        it('most-read response should conform to schema (invalid date, agg=true)', () => {
-            const uri = `${baseUri}page/most-read/2004/01/01`;
-            return assertValidSchemaAggregated(uri);
-        });
-
-        it('news response (invalid language, agg=true) should be empty', () => {
-            return assertValidSchemaAggregated(`${server.config.uri}is.wikipedia.org/v1/page/news`);
-        });
-
-        // Bad requests fail without aggregated=true
-
-        it('featured article request should fail for invalid language when !agg=true', () => {
-            const uri = `${server.config.uri}is.wikipedia.org/v1/page/featured/${dateStr1}`;
-            return assertBadRequest(uri);
-        });
-
-        it('featured image request should fail for invalid date when !agg=true', () => {
-            const uri = `${baseUri}media/image/featured/2004/01/01`;
-            return assertBadRequest(uri);
-        });
-
-        it('most-read request should fail for invalid date when !agg=true', () => {
-            const uri = `${baseUri}page/most-read/2004/01/01`;
-            return assertBadRequest(uri);
-        });
-
-        it('news request should fail for invalid language when !agg=true', () => {
-            return assertBadRequest(`${server.config.uri}is.wikipedia.org/v1/page/news`);
-        });
     });
 
     describe('validate spec examples', () => {
@@ -433,5 +330,4 @@ describe('Swagger spec', function() {
         });
 
     });
-
 });

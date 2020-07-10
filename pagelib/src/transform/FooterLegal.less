@@ -1,0 +1,45 @@
+@import './Themes.less';
+@import './Constants.less';
+
+.pcs-footer-legal-contents {
+  margin-top: 27px;
+  padding-top: 23px;
+  padding-bottom: 27px;
+  background-size: 115px 18px;
+  background-repeat: no-repeat;
+
+  /* This appears as a background-image to allow theming. The width and height root attributes were
+     added manually for Android API 16 AOSP Nexus S emulator. Converted to b64 using
+     https://codepen.io/tigt/post/optimizing-svgs-in-data-uris. */
+	background-image: var(--wikipedia-logo);
+}
+
+.pcs-footer-legal-contents {
+  background-position: left top;
+}
+
+html[dir='rtl'] .pcs-footer-legal-contents,
+.mw-content-rtl .pcs-footer-legal-contents {
+  background-position: right top;
+}
+
+.pcs-footer-legal-license {
+  color: var(--footer-license-text-color);
+  font-size: 0.75em;
+  line-height: 1.5;
+  display: block;
+}
+
+a.pcs-footer-legal-license-link, a.pcs-footer-browser-link {
+  color: var(--link-color);
+}
+
+.pcs-footer-browser {
+  margin-top: 10px;
+}
+
+hr.pcs-footer-legal-divider {
+  height: 1px;
+  border: none;
+  background-color: var(--border-color);
+}

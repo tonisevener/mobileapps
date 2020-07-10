@@ -1,0 +1,81 @@
+paths:
+  /{domain}/v1/page/mobile-html/{title}:
+    get:
+      tags:
+        - Page content
+      summary: Get page content HTML optimized for mobile consumption
+      description: |
+        Gets the content HTML optimized for mobile consumption for the given page. This content
+        is derived from Parsoid HTML (see `/page/html/{title}` endpoint).
+        The difference to Parsoid HTML is roughly:
+        * Some elements and attributes not needed for the reading case are removed.
+        * LeadIntroductionTransform: The introductory paragraph is moved before an infobox.
+        * RedLinks: Red links are flattened (=turned into span elements).
+        * WidenImage: images that should be displayed in gallery are widened.
+        * Section headings are slightly changed by wrapping the headings inside a div and adding
+          a span element inside the new div for the edit buttons.
+        * Additional classes are added to img elements to fix issues with non-white backgrounds.
+          See Theme support below for instructions on how to enable that.
+        * Pagelib CSS files needed to display the content are referenced.
+        * LazyLoadTransform: server-side portion/prep for lazy loading of images.
+
+        What's not included? What parts of the PageLibrary does a client still have to do?
+        Details for this can be found at https://github.com/wikimedia/wikimedia-page-library/blob/master/docs/pcs/pcs.md#interface
+      parameters:
+        - $ref: '#/components/parameters/domainParam'
+        - $ref: '#/components/parameters/title'
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: "#/components/responses/problem"
+      x-amples:
+        - title: Get page content HTML for test page
+          request:
+            params:
+              title: User:BSitzmann_(WMF)/MCS/Test/Frankenstein
+          response:
+            status: 200
+            headers:
+              content-type: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.2.1"
+              content-language: en
+              vary: /.+/
+              etag: /^"[^/"]+/[^/"]+"$/
+              access-control-allow-origin: '*'
+              access-control-allow-headers: accept, x-requested-with, content-type
+              content-security-policy: default-src
+              x-content-security-policy: default-src
+              x-frame-options: SAMEORIGIN
+  /{domain}/v1/page/mobile-html/{title}/{revision}:
+    get:
+      tags:
+        - Page content
+      summary: Get page content HTML optimized for mobile consumption
+      description: |
+        Gets the content HTML optimized for mobile consumption for the given page. This content
+        is derived from Parsoid HTML (see `/page/html/{title}` endpoint).
+        The difference to Parsoid HTML is roughly:
+        * Some elements and attributes not needed for the reading case are removed.
+        * LeadIntroductionTransform: The introductory paragraph is moved before an infobox.
+        * RedLinks: Red links are flattened (=turned into span elements).
+        * WidenImage: images that should be displayed in gallery are widened.
+        * Section headings are slightly changed by wrapping the headings inside a div and adding
+          a span element inside the new div for the edit buttons.
+        * Additional classes are added to img elements to fix issues with non-white backgrounds.
+          See Theme support below for instructions on how to enable that.
+        * Pagelib CSS files needed to display the content are referenced.
+        * LazyLoadTransform: server-side portion/prep for lazy loading of images.
+
+        What's not included? What parts of the PageLibrary does a client still have to do?
+        Details for this can be found at https://github.com/wikimedia/wikimedia-page-library/blob/master/docs/pcs/pcs.md#interface
+      parameters:
+        - $ref: '#/components/parameters/domainParam'
+        - $ref: '#/components/parameters/title'
+        - $ref: '#/components/parameters/revision'
+      responses:
+        200:
+          $ref: '#/components/responses/success'
+        default:
+          $ref: "#/components/responses/problem"
+      x-monitor: false
+      

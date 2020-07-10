@@ -7,14 +7,13 @@ const compression = require('compression');
 const bodyParser = require('body-parser');
 const fs = BBPromise.promisifyAll(require('fs'));
 const sUtil = require('./lib/util');
+const specLib = require('./lib/spec');
 const apiUtil = require('./lib/api-util');
 const mUtil = require('./lib/mobile-util');
 const packageInfo = require('./package.json');
 const yaml = require('js-yaml');
 const addShutdown = require('http-shutdown');
 const path = require('path');
-
-const MAX_STEPS_PER_TICK = 5;
 
 /**
  * Creates an express app and initialises it
@@ -46,29 +45,18 @@ function initApp(options) {
         app.conf.cors = '*';
     }
     if (app.conf.csp === undefined) {
-        // eslint-disable-next-line max-len
-        app.conf.csp = "default-src 'self'; object-src 'none'; media-src *; img-src *; style-src *; frame-ancestors 'self'";
+        app.conf.csp = "default-src 'none'";
     }
 
-   /**
-    * script-src:
-    *   The pagelib JavaScript bundle is served on meta.wikimedia.org.
-    *   We also add a small piece of inline JS to the end of the body to trigger lazy-loading.
-    * style-src:
-    *   The site CSS bundle is served from the current domain (TODO: currently assumes WP).
-    *   The base CSS bundle is served on meta.wikimedia.org.
-    *   The pages also have some inline styles.
-    * img-src:
-    *   We need to specifically allow data: URIs for the buttons from the wikimedia-page-library.
-    */
+    // better to have these values in the config
     if (app.conf.mobile_html_csp === undefined) {
-        // eslint-disable-next-line max-len
-        app.conf.mobile_html_csp = "default-src 'none'; media-src *; img-src * data:; script-src app://meta.wikimedia.org https://meta.wikimedia.org 'unsafe-inline'; style-src app://meta.wikimedia.org https://meta.wikimedia.org app://*.wikipedia.org https://*.wikipedia.org 'self' 'unsafe-inline'; frame-ancestors 'self'";
+        return BBPromise.reject('config missing mobile_html_csp');
     }
-
     if (app.conf.mobile_html_rest_api_base_uri === undefined) {
-        // eslint-disable-next-line max-len
-        app.conf.mobile_html_rest_api_base_uri = 'https://meta.wikimedia.org/api/rest_v1/';
+        return BBPromise.reject('config missing mobile_html_rest_api_base_uri');
+    }
+    if (app.conf.mobile_html_local_rest_api_base_uri_template === undefined) {
+        return BBPromise.reject('config missing mobile_html_local_rest_api_base_uri_template');
     }
 
     // set outgoing proxy
@@ -101,7 +89,7 @@ function initApp(options) {
 
     // set up the spec
     if (!app.conf.spec) {
-        app.conf.spec = `${__dirname}/spec.yaml`;
+        app.conf.spec = specLib.load(`${__dirname}/spec`, {});
     }
     if (app.conf.spec.constructor !== Object) {
         try {
@@ -111,8 +99,8 @@ function initApp(options) {
             app.conf.spec = {};
         }
     }
-    if (!app.conf.spec.swagger) {
-        app.conf.spec.swagger = '2.0';
+    if (!app.conf.spec.openapi) {
+        app.conf.spec.openapi = '3.0.1';
     }
     if (!app.conf.spec.info) {
         app.conf.spec.info = {
@@ -153,9 +141,11 @@ function initApp(options) {
     // enable compression
     app.use(compression({ level: app.conf.compression_level }));
     // use the JSON body parser
-    app.use(bodyParser.json());
+    app.use(bodyParser.json({ limit: app.conf.max_body_size || '100kb' }));
     // use the application/x-www-form-urlencoded parser
     app.use(bodyParser.urlencoded({ extended: true }));
+    // use text for text/html
+    app.use(bodyParser.text({ type: 'text/html', limit: '10MB' }));
 
     return BBPromise.resolve(app);
 
@@ -164,6 +154,7 @@ function initApp(options) {
 /**
  * Loads all routes declared in routes/ into the app
  * @param {Application} app the application object to load routes into
+ * @param {string} dir routes folder
  * @return {bluebird} a promise resolving to the app object
  */
 function loadRoutes(app, dir) {
@@ -185,8 +176,8 @@ function loadRoutes(app, dir) {
                 return undefined;
             }
             // check that the route exports the object we need
-            if (route.constructor !== Object || !route.path || !route.router
-                || !(route.api_version || route.skip_domain)) {
+            if (route.constructor !== Object || !route.path || !route.router ||
+                !(route.api_version || route.skip_domain)) {
                 throw new TypeError(`routes/${fname} does not export the correct object!`);
             }
             // normalise the path to be used as the mount point
@@ -221,22 +212,6 @@ function loadRoutes(app, dir) {
 function loadPreProcessingScripts(app, dir) {
 
     /**
-     * Break down array into chunks of the specified size
-     * @param {!Array} arr array
-     * @param {!integer} size chunk size
-     */
-    function _chunk(arr, size) {
-        return arr.reduce((acc, cur, idx) => {
-            const i = Math.floor(idx / size);
-            if (!acc[i]) {
-                acc[i] = [];
-            }
-            acc[i].push(cur);
-            return acc;
-        }, []);
-    }
-
-    /**
      * Validate the script format
      * @param {!Array} script processing script
      * @throws error if script format is invalid
@@ -252,9 +227,8 @@ function loadPreProcessingScripts(app, dir) {
     app.conf.processing_scripts = {};
     return fs.readdirAsync(dir).map(filename => BBPromise.try(() => {
         const name = filename.split('.')[0];
-        let script = yaml.safeLoad(fs.readFileSync(`${dir}/${filename}`));
+        const script = yaml.safeLoad(fs.readFileSync(`${dir}/${filename}`));
         _validate(script);
-        script = _chunk(script, MAX_STEPS_PER_TICK);
         app.conf.processing_scripts[name] = script;
     })
     .catch(e => app.logger.log('warn/loading', `Error loading processing scripts: ${e}`)))
@@ -300,8 +274,10 @@ function createServer(app) {
  * options and the logger- and metrics-reporting objects from
  * service-runner and starts an HTTP server, attaching the application
  * object to it.
+ * @param {Object} options the options to initialise the app with
+ * @return {bluebird} HTTP server
  */
-module.exports = function(options) {
+module.exports = (options) => {
 
     return initApp(options)
     .then(app => loadRoutes(app, `${__dirname}/routes`))

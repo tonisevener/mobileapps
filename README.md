@@ -6,7 +6,7 @@ This service is a facade the mobile apps can use to improve runtime performance 
 * performing DOM manipulations once on the server instead of on the clients,
 * avoiding downloading of DOM elements that are not displayed in the apps and therefore not needed,
 * taking advantage of caching via RESTBase, and
-* take advantage of streaming by being able to use WebView.loadUrl() instead of piping every page section by section over the JS bridge.
+* taking advantage of streaming by being able to use WebView.loadUrl() instead of piping every page section by section over the JS bridge.
 
 Furthermore this can also speed up development by
 * combining the DOM manipulation code for both apps into a single service,
@@ -15,8 +15,6 @@ Furthermore this can also speed up development by
 * simplifying code because now the apps can use WebView.loadUrl() instead of piping every page section by section over the JS bridge.
 
 More improvements and more endpoints are possible. We could also consider using streaming on the service side. But I'll leave that as a later exercise.
-
-Note: This is currently in early development and things are going to change without notice.
 
 More information can be found on the [wiki](https://www.mediawiki.org/wiki/Wikimedia_Apps/Team/RESTBase_services_for_apps).
 
@@ -37,6 +35,10 @@ cd mobileapps
 npm install
 ```
 
+### Docker setup
+
+It's also possible to engage in development with a docker setup, take a look at this [guide](/docs/develop/docker.md) on how to setup a docker-compose environment for mobileapps.
+
 You are now ready to get to work!
 
 * Inspect/modify/configure `app.js`
@@ -52,75 +54,54 @@ To start the server hosting the REST API, simply run (inside the repo's director
 npm start
 ```
 
-This starts an HTTP server listening on `localhost:6927`.
+This starts an HTTP server listening on `localhost:8888`.
 
 ### Endpoints
-There are a few routes you may query (with a browser, or `curl` and friends). You can see more documentation at `localhost:6927/?doc`.
+There are a few routes you may query (with a browser, or `curl` and friends). You can see more documentation at `localhost:8888/?doc`.
 
 #### Page Content Service routes
 Next generation routes for page content. See [Page_Content_Service](https://www.mediawiki.org/wiki/Page_Content_Service).
 
-* `http://localhost:6927/{domain}/v1/page/summary/{title}`
-* `http://localhost:6927/{domain}/v1/page/metadata/{title}`
-* `http://localhost:6927/{domain}/v1/page/media/{title}`
-* `http://localhost:6927/{domain}/v1/page/references/{title}`
-* `http://localhost:6927/{domain}/v1/page/mobile-compat-html/{title}` (no plans to be exposed
-publicly)
-* `http://localhost:6927/{domain}/v1/page/mobile-html/{title}`
-* `http://localhost:6927/{domain}/v1/page/mobile-html-offline-resources/{title}`
-* `http://localhost:6927/{domain}/v1/data/css/mobile/base`
-* `http://localhost:6927/{domain}/v1/data/css/mobile/pagelib`
-* `http://localhost:6927/{domain}/v1/data/css/mobile/site`
-* `http://localhost:6927/{domain}/v1/data/javascript/mobile/pagelib`
+* `http://localhost:8888/{domain}/v1/page/summary/{title}`
+* `http://localhost:8888/{domain}/v1/page/metadata/{title}`
+* `http://localhost:8888/{domain}/v1/page/media/{title}`
+* `http://localhost:8888/{domain}/v1/page/mobile-html/{title}`
+* `http://localhost:8888/{domain}/v1/transform/html/to/mobile-html/{title}` (POST to this for edit preview)
+* `http://localhost:8888/{domain}/v1/page/mobile-html-offline-resources/{title}`
+* `http://localhost:8888/{domain}/v1/data/css/mobile/base`
+* `http://localhost:8888/{domain}/v1/data/css/mobile/pcs`
+* `http://localhost:8888/{domain}/v1/data/css/mobile/site`
+* `http://localhost:8888/{domain}/v1/data/javascript/mobile/pcs`
 
 #### Mobile Content Service routes
 
 The first generation mobile content route (mainly for Android app):
-* `http://localhost:6927/{domain}/v1/page/mobile-sections/{title}`
+* `http://localhost:8888/{domain}/v1/page/mobile-sections/{title}`
 
-* Example: `http://localhost:6927/en.wikipedia.org/v1/page/mobile-sections/Cat`
+* Example: `http://localhost:8888/en.wikipedia.org/v1/page/mobile-sections/Cat`
 
 There is also a endpoint for definitions from Wiktionary the Android app uses:
-* `http://localhost:6927/{language code}.wiktionary.org/v1/page/definition/{title}`
+* `http://localhost:8888/{language code}.wiktionary.org/v1/page/definition/{title}`
 
-Example: `http://localhost:6927/en.wiktionary.org/v1/page/definition/present`
+Example: `http://localhost:8888/en.wiktionary.org/v1/page/definition/present`
 
 A list of language codes can be found [here](https://meta.wikimedia.org/wiki/Special:SiteMatrix).
 
-#### Feed routes
-* `http://localhost:6927/en.wikipedia.org/v1/page/featured/2016/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/media/image/featured/2016/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/page/news`
-* `http://localhost:6927/en.wikipedia.org/v1/page/most-read/2016/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/page/random/title`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/births/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/deaths/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/events/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/selected/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/holidays/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/onthisday/all/05/30`
-* `http://localhost:6927/en.wikipedia.org/v1/feed/announcements`
-
-Note that day and month need to be 2 digits to be accepted. 0-pad them if necessary.
-
 #### Generic routes
-Feed endpoint availability by language:
-* `http://localhost:6927/wikimedia.org/v1/feed/availability`
-
 Swagger spec:
-* `http://localhost:6927/?spec`
+* `http://localhost:8888/?spec`
 
 Swagger UI:
-* `http://localhost:6927/?doc`
+* `http://localhost:8888/?doc`
 
 Info:
-* `http://localhost:6927/_info`
+* `http://localhost:8888/_info`
 
 #### Quick prototyping using static files
 You can quickly prototype some static responses by adding the wanted files to the `static` folder.
 
 Example: `static/proto/example1.json` is available as 
-http://localhost:6927/static/proto/example1.json.
+http://localhost:8888/static/proto/example1.json.
 
 ### Tests
 

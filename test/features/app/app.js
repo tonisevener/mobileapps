@@ -1,5 +1,3 @@
-/* global describe, it, before, after */
-
 'use strict';
 
 const preq   = require('preq');
@@ -13,7 +11,7 @@ if (!server.stopHookAdded) {
 
 describe('express app', function() {
 
-    this.timeout(20000); // eslint-disable-line no-invalid-this
+    this.timeout(20000);
 
     before(() => server.start());
 
@@ -22,7 +20,7 @@ describe('express app', function() {
             uri: `${server.config.uri}robots.txt`
         }).then((res) => {
             assert.deepEqual(res.status, 200);
-            assert.deepEqual(res.headers.disallow, '/');
+            assert.deepEqual(res.body, 'User-agent: *\nDisallow: /\n');
         });
     });
 
@@ -51,11 +49,9 @@ describe('express app', function() {
             assert.deepEqual(res.headers['x-xss-protection'], '1; mode=block');
             assert.deepEqual(res.headers['x-content-type-options'], 'nosniff');
             assert.deepEqual(res.headers['x-frame-options'], 'SAMEORIGIN');
-            /* eslint-disable max-len */
-            assert.deepEqual(res.headers['content-security-policy'], "default-src 'self'; object-src 'none'; media-src *; img-src *; style-src *; frame-ancestors 'self'");
-            assert.deepEqual(res.headers['x-content-security-policy'], "default-src 'self'; object-src 'none'; media-src *; img-src *; style-src *; frame-ancestors 'self'");
-            assert.deepEqual(res.headers['x-webkit-csp'], "default-src 'self'; object-src 'none'; media-src *; img-src *; style-src *; frame-ancestors 'self'");
-            /* eslint-enable max-len */
+            assert.deepEqual(res.headers['content-security-policy'], "default-src 'none'");
+            assert.deepEqual(res.headers['x-content-security-policy'], "default-src 'none'");
+            assert.deepEqual(res.headers['x-webkit-csp'], "default-src 'none'");
         });
     });
 

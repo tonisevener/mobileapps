@@ -29,7 +29,7 @@ const preq = require('preq');
 const path = require('path');
 
 const DELAY = 10; // delay between requests in ms
-const NEW_PORT = 6927;
+const NEW_PORT = 8888;
 const NEW_VERSION_INFO = '';
 // Set OLD_PORT to a valid port number to go against a second local MCS instance.
 // Set OLD_PORT to 0 to go against production.
@@ -107,7 +107,6 @@ const uriForLocal = (domain, title, rev, port = NEW_PORT) => {
 
 const outputStart = (type, lang) => {
     const file = type.overviewFile;
-    /* eslint-disable max-len */
     file.write('<html>\n');
     file.write('<head>\n');
     file.write('<meta charset="UTF-8"/>\n');

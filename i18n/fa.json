@@ -1,0 +1,27 @@
+{
+	"@metadata": {
+		"authors": [
+			"FarsiNevis"
+		]
+	},
+	"description-add-link-title": "افزودن توضیحات عنوان",
+	"article-read-more-title": "بیشتر بخوانید",
+	"table-title-other": "اطلاعات بیشتر",
+	"page-edit-history": "تاریخچهٔ کامل ویرایش",
+	"info-box-close-text": "بستن",
+	"page-talk-page": "نمایش صفحه بحث",
+	"info-box-title": "اطلاعات اجمالی",
+	"view-in-browser-footer-link": "مقاله را در مرورگر ببینید",
+	"page-location": "دیدن در نقشه",
+	"page-similar-titles": "صفحات مشابه",
+	"page-last-edited": "{{PLURAL:$1|0=ویرایش‌شده امروز|1=ویرایش‌شده دیروز|ویرایش‌شده $1 روز پیش}}",
+	"article-about-title": "دربارهٔ این مقاله",
+	"page-issues": "موضوعات صفحه",
+	"license-footer-name": "CC BY-SA 3.0",
+	"license-footer-text": "محتوا تحت $1 در دسترس است، مگر اینکه خلافش ذکر شده‌باشد.",
+	"page-read-in-other-languages": "موجود به {{PLURAL:$1|$1 زیان دیگر|$1 زبان دیگر}}",
+	"article-edit-button": "ویرایش بخش",
+	"article-edit-protected-button": "ویرایش صفحهٔ محافظت‌شده",
+	"article-section-expand": "گسترش بخش",
+	"table-expand": "گسترش جدول"
+}

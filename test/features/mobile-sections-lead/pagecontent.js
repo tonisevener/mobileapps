@@ -8,7 +8,7 @@ const wikiSectionsLead = 'en.wikipedia.org/v1/page/mobile-sections-lead/';
 
 describe('mobile-sections-lead', function() {
 
-    this.timeout(20000); // eslint-disable-line no-invalid-this
+    this.timeout(20000);
 
     before(() => server.start());
 
@@ -21,7 +21,7 @@ describe('mobile-sections-lead', function() {
                 const lastMod = lead.lastmodified;
                 const prot = lead.protection;
                 assert.equal(res.status, 200);
-                assert.ok(lastMod.startsWith('201'), `${lastMod} should start with 201`); // 2015-
+                assert.ok(lastMod.startsWith('20'), `${lastMod} should start with 20`); // 2015-
                 assert.equal(lead.displaytitle, 'Sections/deep');
                 assert.ok(prot.constructor === Object, 'lead.protection should be an Object');
                 assert.ok(!Object.keys(lead.protection).length, 'Page should not be protected');
@@ -37,8 +37,8 @@ describe('mobile-sections-lead', function() {
         return preq.get({ uri })
             .then((res) => {
                 const lead = res.body;
-                assert.equal(lead.geo.latitude, 37.78333333);
-                assert.equal(lead.geo.longitude, -122.41666667);
+                assert.equal(lead.geo.latitude, 37.7775);
+                assert.equal(lead.geo.longitude, -122.41638889);
             });
     });
     it('es Savonlinna should have a lead object with a geo property', () => {
@@ -68,7 +68,6 @@ describe('mobile-sections-lead', function() {
             });
     });
     it('Mare Tranquillitatis (lunar sea) should not have a geo property', () => {
-        // eslint-disable-next-line max-len
         const uri = `${server.config.uri}es.wikipedia.org/v1/page/mobile-sections-lead/Mare Tranquillitatis`;
         return preq.get({ uri })
             .then((res) => {

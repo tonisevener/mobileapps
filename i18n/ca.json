@@ -1,0 +1,24 @@
+{
+	"@metadata": {
+		"authors": [
+			"Fitoschido"
+		]
+	},
+	"description-add-link-title": "Afegeix una descripció del títol",
+	"article-read-more-title": "Més informació",
+	"table-title-other": "Més informació",
+	"page-edit-history": "Mostra l'historial de modificacions",
+	"info-box-close-text": "Tanca",
+	"page-talk-page": "Mostra la pàgina de discussió",
+	"info-box-title": "Dades ràpides",
+	"view-in-browser-footer-link": "Mostra l'article al navegador",
+	"page-location": "Mostra en un mapa",
+	"page-similar-titles": "Pàgines similars",
+	"page-last-edited": "S’ha actualitzat {{PLURAL:$1|0=avui|1=ahir|fa $1 dies}}",
+	"article-about-title": "Sobre aquest article",
+	"page-issues": "Problemes de la pàgina",
+	"license-footer-name": "CC-BY-SA 3.0",
+	"license-footer-text": "Contingut disponible sota $1 a menys que s'indiqui el contrari.",
+	"page-read-in-other-languages": "Disponible en {{PLURAL:$1|$1 altra llengua|$1 altres llengües}}",
+	"references-preview-header": "Previsualització de les referències"
+}

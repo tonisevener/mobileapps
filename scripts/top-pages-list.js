@@ -7,7 +7,27 @@ const fs = require('fs');
 const preq = require('preq');
 const path = require('path');
 
-const BLACKLIST = require(path.join(__dirname, '../etc/feed/blacklist'));
+// A list of titles persistently in the top results per pageviews but that appear to have few
+// human viewers based on their traffic being almost all mobile or almost all non-mobile.
+// See https://phabricator.wikimedia.org/T124716#2080637.
+const BLACKLIST = [
+    '-',
+    'Test_card',
+    'Web_scraping',
+    'XHamster',
+    'Java_(programming_language)',
+    'Images/upload/bel.jpg',
+    'Superintelligence:_Paths,_Dangers,_Strategies',
+    'Okto',
+    'Proyecto_40',
+    'AMGTV',
+    'Lali_Espósito',
+    'La7',
+    'Vagina',
+    'کس', // mznwiki
+    'مقعد', // mznwiki
+];
+
 const SPECIAL = 'Special:';
 const SPECIAL2 = 'special:';
 const PROJECT = 'wikipedia';
@@ -109,7 +129,6 @@ const getTopPageViews = () => {
 const arg = process.argv[2];
 if (arg) {
     lang = arg;
-    // eslint-disable-next-line max-len
     topMonthlyPageViews = `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/${lang}.${PROJECT}/all-access/${YEAR}/${MONTH}/all-days`;
     outputFile = path.join(OUTPUT_DIR, `top-pages.${lang}.json`);
     parsoidBaseUri = `https://${lang}.${PROJECT}.org/api/rest_v1/page/html`;

@@ -1,8 +1,10 @@
 'use strict';
 
 const assert = require('../../utils/assert');
+const domino = require('domino');
 const media = require('../../../lib/media');
 const getCodecs = media.testing.getCodecs;
+const getStructuredSrcSet = media.testing.getStructuredSrcSet;
 const imageInfo = require('../../../lib/imageinfo');
 const getStructuredArtistInfo = imageInfo.getStructuredArtistInfo;
 const makeResults = imageInfo.testing.makeResults;
@@ -147,12 +149,11 @@ describe('lib:media metadata is correctly parsed from HTML', () => {
     // Skip until a long term solution for https://phabricator.wikimedia.org/T214338 is found
     it.skip('pronunciation titles are decoded after parsing from HTML', () => {
         const result = media.getMediaItemInfoFromPage(pronunciationWithPercentEncodedTitle)[0];
-        // eslint-disable-next-line max-len
         assert.deepEqual(result.title, 'File:En-us-A.p.j. Abdul Kalam from India pronunciation (Voice of America).ogg');
     });
 
     it('items without imageinfo properties (e.g., deleted items) are filtered', () => {
-        assert.deepEqual(makeResults([1], undefined, [ { id: 1 } ]), []);
+        assert.deepEqual(makeResults([1], undefined, [ { id: 1 } ]), {});
     });
 });
 
@@ -230,5 +231,34 @@ describe('lib:media:getCodecs', () => {
         assert.deepEqual(getCodecs(undefined), undefined);
         assert.deepEqual(getCodecs(';;;;111;;!1lksjdfd:'), undefined);
         assert.deepEqual(getCodecs('¯\\_(ツ)_/¯'), undefined);
+    });
+});
+
+describe('lib:media:getStructuredSrcSet', () => {
+    it('should return structured srcset values', () => {
+        const doc = domino.createDocument('<img srcset="//image1 1.5x, //image2 2x">');
+        const img = doc.querySelector('img');
+        const expected = [ { src: '//image1', scale: '1.5x' }, { src: '//image2', scale: '2x' } ];
+        assert.deepEqual(getStructuredSrcSet(img), expected);
+    });
+    it('should return structured srcset and src values', () => {
+        const doc = domino.createDocument('<img src="//image" srcset="//image1 1.5x, //image2 2x">');
+        const img = doc.querySelector('img');
+        const expected = [
+            { src: '//image', scale: '1x' },
+            { src: '//image1', scale: '1.5x' },
+            { src: '//image2', scale: '2x' }
+        ];
+        assert.deepEqual(getStructuredSrcSet(img), expected);
+    });
+    it('should return 1x if no scale is present in the srcset values', () => {
+        const doc = domino.createDocument('<img srcset="//image1"></img>');
+        const img = doc.querySelector('img');
+        assert.deepEqual(getStructuredSrcSet(img)[0].scale, '1x');
+    });
+    it('should return empty array if srcset is empty', () => {
+        const doc = domino.createDocument('<img></img>');
+        const img = doc.querySelector('img');
+        assert.deepEqual(getStructuredSrcSet(img), []);
     });
 });

@@ -1,0 +1,214 @@
+/* Examples:
+  - Barack Obama's collapsed infobox:
+
+    <div class=pcs-collapse-table-container>
+      <div class='pcs-collapse-table-collapsed-container pcs-collapse-table-expanded'
+        style='display: block'>
+        <strong>Quick facts</strong><span class=pcs-collapse-table-collapse-text>: 44th
+          President of the United States, Vice President …</span>
+      </div>
+      <table class='infobox vcard'
+        style='width: 22em; margin-top: 0px; margin-bottom: 0px; display: none'>
+        <tbody>
+          <tr>
+            <th colspan=2
+              style='text-align: center; font-size: 125%; font-weight: bold; font-size: 130%'>
+              <span class=fn>Barack Obama</span>
+            </th>
+          </tr>
+          ...
+        </tbody>
+      </table>
+      <div class='pcs-collapse-table-collapsed-bottom pcs-collapse-table-icon'
+        style='display: none'>
+        Close
+      </div>
+    </div>
+
+  - Frankenstein's monster's expanded infobox:
+
+    <div class=pcs-collapse-table-container>
+      <div class='pcs-collapse-table-collapsed-container pcs-collapse-table-collapsed pcs-collapse-table-icon'
+        style='display: block'>
+        <strong>Quick facts</strong><span class=pcs-collapse-table-collapse-text>: Created
+          by, Information …</span>
+      </div>
+      <table class=infobox
+        style='width: 22em; border-spacing: 2px 5px; margin-top: 0px; margin-bottom: 0px; display: block'>
+        <tbody>
+          <tr>
+            <th colspan=2
+              style='text-align: center; font-size: 125%; font-weight: bold; background: #dedee2;'>
+              Frankenstein's monster
+            </th>
+          </tr>
+          ...
+        </tbody>
+      </table>
+      <div class='pcs-collapse-table-collapsed-bottom pcs-collapse-table-icon'
+        style='display: block'>
+        Close
+      </div>
+    </div>
+
+  - Dracula's collapsed notes and references:
+
+    <div class=pcs-collapse-table-container>
+      <div class='pcs-collapse-table-collapsed-container pcs-collapse-table-expanded'
+        style='display: block'>
+        <strong class=app-table-collapsed-caption>Tap to expand</strong>
+      </div>
+      <div class='reflist references-column-width'
+        style='column-width: 30em; list-style-type: decimal; padding: 4px; display: none'>
+          ...
+      </div>
+      <div class='pcs-collapse-table-collapsed-bottom pcs-collapse-table-icon'
+        style='display: none'>
+        Close
+      </div>
+    </div>
+
+  - French Wikipedia uses infobox_v3: https://fr.wikipedia.org/api/rest_v1/page/mobile-html/France
+*/
+
+@import './Themes.less';
+@import './Constants.less';
+
+.content table.infobox,
+.content .infobox_v3 {
+  font-size: 100%;
+  border-style: none !important;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+/* Fix for upstream CSS landscape tablet layout interfering with collapsible table width. T221037 */
+@media all and (min-width:720px) {
+  table.infobox,
+  .infobox_v3 {
+    margin: initial;
+    max-width: initial;
+    float: initial;
+  }
+}
+
+table.infobox caption,
+.infobox_v3 caption {
+  text-align: center;
+  font-weight: bold;
+  padding: 10px 10px 0px 10px;
+}
+
+div.pcs-collapse-table-container {
+  width: 100%;
+  margin-top: 14px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  box-shadow: var(--box-shadow-collapse-table);
+  clear: both;
+  .nonDefaultThemes({
+    background-color: var(--collapse-table-background) !important;
+  })
+}
+
+.pcs-collapse-table {
+  float: none !important;
+  max-width: none !important;
+  margin-top: 0px !important;
+  margin-bottom: 0px !important;
+}
+
+/* The outermost table container header's subcaption text. */
+.pcs-collapse-table-collapse-text {
+  color: var(--secondary-text-color);
+}
+
+/* Temporary fix to prevent right side of collapsed tables from extending
+   offscreen. todo: fix, add an example, or remove. */
+.pcs-collapse-icon,
+.pcs-collapse-table-container,
+.pcs-collapse-table-collapsed-container,
+.pcs-collapse-table-collapsed,
+.pcs-collapse-table-icon {
+  box-sizing: border-box;
+}
+
+/* Common between outermost table container's header and footer */
+.pcs-collapse-table-collapsed-container,
+.pcs-collapse-table-collapsed-bottom {
+  width: 100%;
+  padding: 12px 48px 12px 12px;
+  line-height: 120%;
+  background-color: var(--mid-background);
+  background-repeat: no-repeat;
+  background-position: 95% 50%;
+  background-size: 1em 1em;
+
+  .nonDefaultThemes({
+    // For all non-default themes, we're forcing the mid-background.
+    // Otherwise, it tends to get the "inherit" value from the div:not(.notheme)
+    // rule in the ThemeTransform file.
+    background-color: var(--mid-background) !important;
+  })
+}
+
+/* The outermost table container's footer. */
+.pcs-collapse-table-collapsed-bottom {
+  color: @wmui-color-base30;
+  border-radius: 0 0 2px 2px;
+}
+
+html[dir='rtl'] .pcs-collapse-table-collapsed-container,
+body[dir='rtl'] .pcs-collapse-table-collapsed-container,
+html[dir='rtl'] .pcs-collapse-table-collapsed-bottom,
+body[dir='rtl'] .pcs-collapse-table-collapsed-bottom {
+  background-position-x: 5%;
+}
+
+/* The outermost table container's expanded header. */
+.pcs-collapse-table-collapsed {
+  border-radius: 2px 2px 0 0;
+}
+
+/* The outermost table container's collapsed header. */
+.pcs-collapse-table-expanded {
+  border-radius: 2px;
+}
+
+/*
+   pcs-collapse-icon is the preferred name going forward
+   pcs-collapse-table-icon is kept for backwards-compatibility with already rendered pages
+   with mobile-html 1.2.1 (2020-04)
+ */
+.pcs-collapse-icon,
+.pcs-section-control-hide /* temp */,
+.pcs-collapse-table-icon /* old */ {
+  background-image: var(--collapse-icon);
+}
+
+/*
+   pcs-expand-icon is the preferred name going forward
+   pcs-collapse-table-expanded is kept for backwards-compatibility with already rendered pages
+   with mobile-html 1.2.1 (2020-04)
+ */
+.pcs-expand-icon,
+.pcs-section-control-show /* temp */,
+.pcs-collapse-table-expanded /* old */ {
+  background-image: var(--expand-icon);
+}
+
+/* Avoid infobox too narrow issue, see https://phabricator.wikimedia.org/T201381,
+   undoing some of https://gerrit.wikimedia.org/r/c/mediawiki/skins/MinervaNeue/+/428868
+   but only for tables we collapse. */
+.pcs-collapse-table-container table {
+  width: 100% !important;
+  height: initial !important;
+}
+
+.pcs-collapse-table-content {
+  overflow-x: auto;
+}
+
+.wikitable {
+  border: none;
+}

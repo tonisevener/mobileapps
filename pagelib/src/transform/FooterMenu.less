@@ -1,0 +1,82 @@
+@import './Themes.less';
+@import './Constants.less';
+
+#pcs-footer-container-menu-items {
+  width: 100%;
+  border-collapse: collapse;
+  padding: .5px 0px;
+}
+
+.pcs-footer-menu-item {
+  padding: 13px 0 17px;
+  background-size: 20px 20px;
+  background-repeat: no-repeat;
+  background-color: var(--sub-cell-background);
+  background-origin: content-box;
+  position: relative;
+}
+
+html[dir='ltr'] .pcs-footer-menu-item,
+body[dir='ltr'] .pcs-footer-menu-item {
+  background-position: left 0 center;
+}
+
+html[dir='rtl'] .pcs-footer-menu-item,
+body[dir='rtl'] .pcs-footer-menu-item {
+  background-position: right 0 center;
+}
+
+.pcs-footer-menu-item-title {
+  color: var(--footer-title-text-color);
+  min-height: 1.38em;
+}
+
+html[dir='ltr'] .pcs-footer-menu-item-title,
+body[dir='ltr'] .pcs-footer-menu-item-title {
+  padding-left: 36px;
+}
+
+html[dir='rtl'] .pcs-footer-menu-item-title,
+body[dir='rtl'] .pcs-footer-menu-item-title {
+  padding-right: 36px;
+}
+
+.pcs-footer-menu-item-subtitle {
+  color: var(--footer-text-color);
+  font-size: 0.875em; /*14px @16px*/
+  line-height: 1.1428571429; /*16px @14px*/
+}
+
+html[dir='ltr'] .pcs-footer-menu-item-subtitle,
+body[dir='ltr'] .pcs-footer-menu-item-subtitle {
+  padding-left: 36px;
+}
+
+html[dir='rtl'] .pcs-footer-menu-item-subtitle,
+body[dir='rtl'] .pcs-footer-menu-item-subtitle {
+  padding-right: 36px;
+}
+
+#pcs-footer-container-menu-heading {
+  padding: .5em;
+}
+
+.pcs-footer-menu-icon-last-edited {
+  background-image: var(--last-edited-icon);
+}
+
+.pcs-footer-menu-icon-talk-page {
+  background-image: var(--talk-page-icon);
+}
+
+.pcs-footer-menu-icon-page-issues {
+  background-image: var(--issues-page-icon);
+}
+
+.pcs-footer-menu-icon-disambiguation {
+  background-image: var(--disambiguation-icon);
+}
+
+.pcs-footer-menu-icon-coordinate {
+  background-image: var(--coordinate-icon);
+}

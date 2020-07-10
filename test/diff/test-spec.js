@@ -1,6 +1,7 @@
 'use strict';
 
 const htmlDebug = require('./html-debug');
+const beautifyHtml = require('js-beautify').html;
 
 // To update the expected test results temporarily set the constant UPDATE_EXPECTED_RESULTS to true.
 // After the run consider updating the TestSpec constructors later in this file to paste in the
@@ -23,12 +24,21 @@ class TestSpec {
      * @param {?Array<string>} parameters parameter values
      * @param {?object} options an optional object for additional settings:
      * @param {?string} options.suffix file suffix, default = 'json'
+     * @param {?string} options.method HTTP method, default = 'GET'
+     * @param {?string} options.payloadFile file path to load a fixture for a POST request body
+     * @param {?object} options.headers map of HTTP headers
      */
     constructor(domain, route, parameters, options) {
         this._domain = domain;
         this._route = route;
         this._parameters = parameters;
-        this._options = options || { suffix: 'json' };
+        this._options = options || {};
+        this._options.suffix = this._options.suffix || 'json';
+        this._options.method = this._options.method || 'GET';
+        this._options.headers = this._options.headers || { 'cache-control': 'no-cache' };
+        if (!this._options.headers['cache-control']) {
+            this._options.headers['cache-control'] = 'no-cache';
+        }
     }
 
     /**
@@ -55,8 +65,7 @@ class TestSpec {
      * @return {!string} name of this test to print to the console
      */
     testName() {
-        // eslint-disable-next-line max-len
-        return `${TestSpec.fsName(this._route)}-${TestSpec.fsName(this.project())}-${this._parameters.join('-')}`;
+        return TestSpec.fsName(`${this._route}-${this.project()}-${this._parameters.join('-')}`);
     }
 
     /**
@@ -70,7 +79,7 @@ class TestSpec {
      * @return {!string} file name to store expected result in (without file extension)
      */
     fileName() {
-        return `${encodeURIComponent(this.testName())}`;
+        return encodeURIComponent(this.testName());
     }
 
     /**
@@ -81,97 +90,40 @@ class TestSpec {
     }
 
     /**
+     * @return {!string} HTTP method ('GET' or 'POST')
+     */
+    getHttpMethod() {
+        return this._options.method;
+    }
+
+    /**
+     * @return {!object} map of header key value pairs
+     */
+    getHeaders() {
+        return this._options.headers;
+    }
+
+    /**
+     * @return {!string} file to load to use as body for POST requests
+     */
+    getPayloadFile() {
+        return this._options.payloadFile;
+    }
+
+    /**
      * @return {!string} path portion of the request URI
      */
     uriPath() {
         let path = `${this._domain}/v1/${this._route}`;
         if (this._parameters) {
-            path += `/${this._parameters.join('/')}`;
+            for (const param of this._parameters) {
+                path += `/${encodeURIComponent(param)}`;
+            }
         }
         return path;
     }
 
-    postProcessing(rsp) {
-        return rsp;
-    }
-
-    /**
-     * @private
-     * @param {!string} array input array
-     * @return {!string} a string of JS code to make a array of strings
-     */
-    static toStringArrayCode(array) {
-        return `['${array.join("', '")}']`;
-    }
-
-    /**
-     * Prints the constructor for updating scripts
-     * @return {string}
-     */
-    generator() {
-        if (this._parameters) {
-            // eslint-disable-next-line max-len
-            return `    new TestSpec('${this._domain}', '${this._route}', ${TestSpec.toStringArrayCode(this._parameters)}),`;
-        } else {
-            return `    new TestSpec('${this._domain}', '${this._route}'),`;
-        }
-    }
-}
-
-/**
- * A TestSpec which covers a specific page which has an optional revision parameter
- * (powered by Parsoid).
- *
- * @protected {!string} _domain
- * @protected {!string} _route
- * @protected {!string} _title
- * @protected {?string} _revision
- */
-class TestPageSpec extends TestSpec {
-    /**
-     * @param {!string} domain project domain (e.g. 'en.wikipedia.org')
-     * @param {!string} route endpoint specifier
-     * @param {!string} title human readable page title (unencoded)
-     * @param {?string} revision revision of the page when the expectation was saved
-     */
-    constructor(domain, route, title, revision) {
-        super(domain, route, [title, revision]);
-        this._title = title;
-        this._revision = revision;
-    }
-
-    /**
-     * @override
-     * @return {!string} name of this test to print to the console
-     */
-    testName() {
-        // eslint-disable-next-line max-len
-        return `${TestSpec.fsName(this._route)}-${TestSpec.fsName(this.project())}-${TestSpec.fsName(this._title)}`;
-    }
-
-    /**
-     * @private
-     * @return {!string} percent-encoded version of the title string
-     */
-    encodedTitle() {
-        return encodeURIComponent(this._title);
-    }
-
-    /**
-     * @override
-     * @return {!string} path portion of the request URI
-     */
-    uriPath() {
-        let path = `${this._domain}/v1/${this._route}/${this.encodedTitle()}`;
-        if (this._revision) {
-            path += `/${this._revision}`; // prefer revisions for more stability
-        }
-        return path;
-    }
-
-    postProcessing(rsp) {
-        let input = rsp.body;
-
+    introduceFixedValuesForJSON(input) {
         input = JSON.parse(
             JSON.stringify(input)
             .replace(/#mwt\d+/g, '#mwt_present')
@@ -194,7 +146,7 @@ class TestPageSpec extends TestSpec {
                     // Simplify the numbers in:
                     // usemap=\"#ImageMap_1_922168371\"></a>
                     // <map name=\"ImageMap_1_922168371\" id=\"ImageMap_1_922168371\">
-                    section.text = section.text.replace(/ImageMap_\d+_\d+/g, 'ImageMap_');
+                    section.text = section.text.replace(/ImageMap_\w+/g, 'ImageMap_');
                     // Simplify the revision numbers in:
                     // data-mw-deduplicate=\"TemplateStyles:r856303569\"
                     section.text = section.text.replace(
@@ -213,55 +165,96 @@ class TestPageSpec extends TestSpec {
             input.tid = 'present';
         }
 
-        rsp.body = input;
+        return input;
+    }
+
+    introduceFixedValuesForHTML(input) {
+        input = input
+            .replace(/#mwt\d+/g, '#mwt_present')
+            .replace(/id=\\"mw[\w-]{2,3}\\"/g, 'id=\\"mw_id\\"');
+
+        input = input
+            // Simplify the numbers in:
+            // usemap=\"#ImageMap_1_922168371\"></a>
+            // <map name=\"ImageMap_1_922168371\" id=\"ImageMap_1_922168371\">
+            .replace(/ImageMap_\w+/g, 'ImageMap_')
+            // Simplify the revision numbers in:
+            // data-mw-deduplicate=\"TemplateStyles:r856303569\"
+            .replace(
+                /(data-mw-deduplicate="TemplateStyles:r)\d+(")/g,
+                '$1_REV_$2'
+            );
+
+        // Simplify <meta property="mw:TimeUuid" content="34d12950-ada6-11e9-84ef-7ddcc0b63515">
+        input = input
+            .replace(
+                /<meta property="mw:TimeUuid" content="[-0-9a-f]+"/,
+                '<meta property="mw:TimeUuid" content="FIXED_TIME_UUID"'
+            );
+
+        input = beautifyHtml(input, { indent_size: 2, html: { end_with_newline: true } });
+
+        return input;
+    }
+
+    postProcessing(rsp) {
+        if (this._options.suffix === 'json') {
+            let input = rsp.body;
+            input = this.introduceFixedValuesForJSON(input);
+            rsp.body = JSON.stringify(input, null, 2);
+        } else if (this._options.suffix === 'html') {
+            let input = rsp.body;
+            input = this.introduceFixedValuesForHTML(input);
+            rsp.body = input;
+        }
         return rsp;
     }
 
     /**
-     * @override
+     * @private
+     * @param {!string} array input array
+     * @return {!string} a string of JS code to make a array of strings
+     */
+    static toStringArrayCode(array) {
+        return `['${array.join("', '")}']`;
+    }
+
+    /**
      * Prints the constructor for updating scripts
      * @return {string}
      */
     generator() {
-        const requiredParams = `'${this._domain}', '${this._route}', '${this._title}'`;
-        let optionalParams = '';
-
-        if (this._revision) {
-            optionalParams = `, '${this._revision}'`;
+        if (this._parameters) {
+            return `    new TestSpec('${this._domain}', '${this._route}', ${TestSpec.toStringArrayCode(this._parameters)}),`;
+        } else {
+            return `    new TestSpec('${this._domain}', '${this._route}'),`;
         }
-
-        return `    new TestPageSpec(${requiredParams}${optionalParams}),`;
     }
 }
 
-/* eslint-disable max-len */
 const TEST_SPECS = [
     new TestSpec('meta.wikimedia.org', 'data/javascript/mobile', ['pagelib'], { suffix: 'js' }),
     new TestSpec('meta.wikimedia.org', 'data/css/mobile', ['pagelib'], { suffix: 'css' }),
     new TestSpec('en.wikipedia.org', 'data/css/mobile', ['site'], { suffix: 'css' }),
 
-    new TestSpec('en.wikipedia.org', 'page/featured', ['2016', '04', '29']),
-    new TestSpec('en.wikipedia.org', 'media/image/featured', ['2019', '06', '11']),
-    new TestSpec('en.wikipedia.org', 'page/most-read', ['2016', '01', '01']),
+    new TestSpec('en.wikipedia.org', 'page/mobile-sections', ['User:BSitzmann_(WMF)/MCS/Test/TitleLinkEncoding', '743079682']),
+    new TestSpec('en.wikipedia.org', 'page/mobile-sections', ['User:BSitzmann_(WMF)/MCS/Test/Frankenstein', '778666613']),
 
-    new TestPageSpec('en.wikipedia.org', 'page/mobile-sections', 'User:BSitzmann_(WMF)/MCS/Test/TitleLinkEncoding', '743079682'),
-    new TestPageSpec('en.wikipedia.org', 'page/mobile-sections', 'User:BSitzmann_(WMF)/MCS/Test/Frankenstein', '778666613'),
+    new TestSpec('en.wikipedia.org', 'page/mobile-html', ['User:BSitzmann_(WMF)/MCS/Test/TitleLinkEncoding', '743079682'], { suffix: 'html' }),
+    new TestSpec('en.wikipedia.org', 'page/mobile-html', ['User:BSitzmann_(WMF)/MCS/Test/Frankenstein', '778666613'], { suffix: 'html' }),
+    new TestSpec('en.wikipedia.org', 'transform/html/to/mobile-html', ['Dog'], { suffix: 'html', method: 'POST', headers: { 'Content-Type': 'text/html' }, payloadFile: 'test/fixtures/Dog.html' }),
+    // zh-TW is the first relevant language variant in this list of accepted languages
+    new TestSpec('zh.wikipedia.org', 'page/mobile-html', ['天囷增十五', '44944947'], { suffix: 'html', headers: { 'accept-language': 'en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7' } }),
 
-    new TestPageSpec('en.wikipedia.org', 'page/media', 'Hummingbird', '810247947'),
+    new TestSpec('en.wikipedia.org', 'page/media-list', ['Hummingbird', '810247947']),
 
-    new TestPageSpec('www.mediawiki.org', 'page/references', 'Page_Content_Service/References/SimpleReference', '2640831'),
-    new TestPageSpec('www.mediawiki.org', 'page/references', 'Page_Content_Service/References/MultipleReflists', '2640615'),
-    new TestPageSpec('en.wikipedia.org', 'page/references', 'Neutronium', '857150438'),
+    new TestSpec('en.wiktionary.org', 'page/definition', ['cat', '50657469']),
 
-    new TestPageSpec('en.wiktionary.org', 'page/definition', 'cat', '50657469'),
+    new TestSpec('en.wikipedia.org', 'page/summary', ['Tokyo', '871928272']),
 
-    new TestPageSpec('en.wikipedia.org', 'page/metadata', 'Red_Wing,_Minnesota', '876662662'),
-
-    new TestPageSpec('en.wikipedia.org', 'page/summary', 'Tokyo', '871928272'),
-
-    new TestPageSpec('en.wikipedia.org', 'page/talk', 'User_talk:Brion_VIBBER', '895522398'),
-    new TestPageSpec('en.wikipedia.org', 'page/talk', 'User_talk:Montehurd', '899425787'),
-    new TestPageSpec('fr.wikipedia.org', 'page/talk', 'User_talk:Brion_VIBBER', '51609364')
+    new TestSpec('en.wikipedia.org', 'page/talk', ['User_talk:Brion_VIBBER', '895522398']),
+    new TestSpec('en.wikipedia.org', 'page/talk', ['User_talk:Montehurd', '899425787']),
+    new TestSpec('fr.wikipedia.org', 'page/talk', ['User_talk:Brion_VIBBER', '51609364'])
 ];
 /* eslint-enable max-len */
 

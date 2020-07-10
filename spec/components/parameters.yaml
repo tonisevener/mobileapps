@@ -1,0 +1,32 @@
+components:
+  parameters:
+    domainParam:
+      in: path
+      name: domain
+      required: true
+      schema:
+        type: string
+      description: |
+        Project domain for the requested data.
+    title:
+      in: path
+      name: title
+      required: true
+      schema:
+        type: string
+      description: |
+        Page title. Use underscores instead of spaces. Example: `Main_Page`
+    revision:
+      in: path
+      name: revision
+      required: true
+      schema:
+        type: integer
+      description: Revision ID
+    tid:
+      in: path
+      name: tid
+      required: true
+      schema:
+        type: integer
+      description: Time UUID of the rendering (used for rerenders when non-revision content changes)
