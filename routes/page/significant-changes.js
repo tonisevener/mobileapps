@@ -1,10 +1,43 @@
 const router = require('../../lib/util').router();
 const mUtil = require('../../lib/mobile-util');
 const mwapi = require('../../lib/mwapi');
+const mwrestapi = require('../../lib/mwrestapi');
 const BBPromise = require('bluebird');
 const api = require('../../lib/api-util');
+const express = require('express');
 
 let app;
+
+const diffPromise = (req, revid, parentid) => {
+    return mwrestapi.queryForDiff(req, revid, parentid)
+        .then( (response) => {
+            return Object.assign({
+                revID: revid,
+                body: response.body
+            });
+        });
+};
+
+function getSignificantChanges2(req, res) {
+    return mwapi.queryForRevisions(req)
+        .then( (response) => {
+            // eslint-disable-next-line no-console
+            console.log(response);
+
+            // hit compare endpoint for each revision
+            const revisions = response.body.query.pages[0].revisions;
+
+            // may be able to clean this up with map somehow http://bluebirdjs.com/docs/api/promise.map.html
+
+            return BBPromise.map(revisions, function(revision) {
+                return diffPromise(req, revision.revid, revision.parentid);
+            });
+        })
+        .then( (response) => {
+            // eslint-disable-next-line no-console
+            console.log(response);
+        });
+}
 
 function getSignificantChanges(req, res) {
     return BBPromise.props({
@@ -271,7 +304,7 @@ function getSignificantChanges(req, res) {
 
 router.get('/page/significant-changes/:title', (req, res) => {
     // res.status(200);
-    return getSignificantChanges(req, res);
+    return getSignificantChanges2(req, res);
     // const result = Object.assign({ result: "What up new endpoint."});
     // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
     // res.json(result).end();

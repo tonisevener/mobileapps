@@ -86,6 +86,14 @@ services:
           user-agent: '{{user-agent}}'
           accept-language: '{{accept-language}}'
         body: '{{ default(request.query, {}) }}'
+      # the template used for contacting MW Rest API
+      mwrestapi_req:
+        method: '{{request.method}}'
+        uri: https://{{domain}}/w/rest.php/v1/{+path}
+        query: '{{ default(request.query, {}) }}'
+        headers: '{{request.headers}}'
+        body: '{{request.body}}'
+        timeout: 60000 # 60 * 1000
       # the template used for contacting RESTBase
       restbase_req:
         method: '{{request.method}}'
