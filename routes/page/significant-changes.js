@@ -6,14 +6,14 @@ const api = require('../../lib/api-util');
 
 let app;
 
-function getHistoryBatch(req, res) {
+function getSignificantChanges(req, res) {
     return BBPromise.props({
         mw: mwapi.queryForRevisions(req)
     }).then((response) => {
         return response.mw;
     }).then((response) => {
         res.status(response.status);
-        mUtil.setContentType(res, mUtil.CONTENT_TYPES.historyBatch);
+        mUtil.setContentType(res, mUtil.CONTENT_TYPES.significantChanges);
         // mUtil.setETag(res, mobileHTML.metadata.revision);
         // mUtil.setLanguageHeaders(res, mobileHTML.metadata._headers);
         // mUtil.setContentSecurityPolicy(res, app.conf.mobile_html_csp);
@@ -269,9 +269,9 @@ function getHistoryBatch(req, res) {
     });
 }
 
-router.get('/page/history-batch/:title', (req, res) => {
+router.get('/page/significant-changes/:title', (req, res) => {
     // res.status(200);
-    return getHistoryBatch(req, res);
+    return getSignificantChanges(req, res);
     // const result = Object.assign({ result: "What up new endpoint."});
     // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
     // res.json(result).end();
