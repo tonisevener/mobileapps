@@ -5,39 +5,271 @@ const mwrestapi = require('../../lib/mwrestapi');
 const BBPromise = require('bluebird');
 const api = require('../../lib/api-util');
 const express = require('express');
+const parsoidApi = require('../../lib/parsoid-access');
 
 let app;
 
-const diffPromise = (req, revid, parentid) => {
-    return mwrestapi.queryForDiff(req, revid, parentid)
+const significantChangesCache = {};
+
+const diffAndRevisionPromise = (req, revision) => {
+    return mwrestapi.queryForDiff(req, revision.revid, revision.parentid)
         .then( (response) => {
             return Object.assign({
-                revID: revid,
+                revision: revision,
                 body: response.body
             });
         });
 };
 
+//curl -X POST "https://en.wikipedia.org/api/rest_v1/transform/wikitext/to/html/Dog" -H "accept: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/HTML/2.1.0"" -H "Content-Type: multipart/form-data" -F "wikitext='testing'" -F "body_only=true" -F "stash=true"
+//"https://en.wikipedia.org/api/rest_v1/transform/wikitext/to/html/Dog" -H "accept: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/HTML/2.1.0"" -H "Content-Type: multipart/form-data" -F "wikitext='testing'" -F "body_only=true" -F "stash=true"
+//wat console write
+/*
+{ method: 'get',
+  uri:
+   "https://en.wikipedia.org/w/rest.php/v1/revision/967289946/compare/967285956",
+  query: {},
+  headers: {},
+  body: undefined,
+  timeout: 60000 }
+ */
+
+//call like req.issueRequest(wat);
+//then chain parsoidApi.mobileHTMLPromiseFromHTML
+// const snippetAndRevisionPromise = (app, req, res, html, revision) => {
+//     return mwrestapi.queryForDiff(req, revision.revid, revision.parentid)
+//         .then( (response) => {
+//             return Object.assign({
+//                 revision: revision,
+//                 body: response.body
+//             });
+//         });
+// };
+
+const diffAndRevisionPromises = (req, revisions) => {
+    return BBPromise.map(revisions, function(revision) {
+        return diffAndRevisionPromise(req, revision);
+    });
+};
+
+const talkPageTitle = (req) => {
+    return `Talk:${req.params.title}`
+};
+
+const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
+    return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd );
+};
+
+const significantChangesCacheKey = (req, title, revision) => {
+    const keyTitle = title || req.params.title;
+    return `${req.params.domain}-${title}-${revision.revid}`;
+};
+
+function getCachedAndUncachedItems(revisions, req, title) {
+    // add cache to output and filter out of processing flow
+    const uncachedRevisions = [];
+    const cachedOutput = [];
+    revisions.forEach(function (revision) {
+
+        const cacheKey = significantChangesCacheKey(req, title, revision);
+        const cacheItem = significantChangesCache[cacheKey];
+        if (cacheItem) {
+            cachedOutput.push(cacheItem);
+        } else {
+            uncachedRevisions.push(revision);
+        }
+    });
+
+    return Object.assign({
+        uncachedRevisions: uncachedRevisions,
+        cachedOutput: cachedOutput
+    });
+}
+
+class ByteChange {
+    constructor(addedCount, deletedCount) {
+        this.addedCount = addedCount;
+        this.deletedCount = deletedCount;
+    }
+
+    totalCount() {
+        return this.addedCount + this.deletedCount;
+    }
+}
+
+class SmallOutput {
+    constructor(revid, timestamp, outputType) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = outputType;
+    }
+}
+
+class LargeOutput {
+    constructor(revid, timestamp, outputType, snippet) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = outputType;
+        this.snippet = snippet;
+    }
+}
+
+function updateDiffAndRevisionsWithByteCount(diffAndRevisions) {
+    console.log(diffAndRevisions);
+
+    // Loop through diffs, filter out type 0 (context type) and assign byte change properties to the remaining
+
+    diffAndRevisions.forEach(function (diffAndRevision) {
+
+        var filteredDiffs = [];
+
+        var aggregateAddedCount = 0;
+        var aggregateDeletedCount = 0;
+        diffAndRevision.body.diff.forEach(function (diff) {
+            var lineAddedCount = 0;
+            var lineDeletedCount = 0;
+            switch (diff.type) {
+                case 0: // Context line type
+                    return;
+                case 1: // Add complete line type
+                    lineAddedCount = diff.text.length;
+                    break;
+                case 2: // Delete complete line type
+                    lineDeletedCount = diff.text.length;
+                    break;
+                case 3: // Change line type (add and deleted ranges in line)
+                    //todo: there's something funky with added and deleted types. see United_States revid 966656680, says added 172 bytes (type 0 highlighted range) but UI shows deleted in desktop and app.
+                    diff.highlightRanges.forEach(function (range) {
+                        switch (range.type) {
+                            case 0: // Add range type
+                                lineAddedCount += range.length;
+                                break;
+                            case 1: // Delete range type
+                                lineDeletedCount += range.length;
+                                break;
+                            default:
+                                break;
+                        }
+                    });
+                    break;
+                default:
+                    break;
+            }
+
+            aggregateAddedCount += lineAddedCount;
+            aggregateDeletedCount += lineDeletedCount;
+
+            diff.byteChange = new ByteChange(lineAddedCount, lineDeletedCount);
+            filteredDiffs.push(diff);
+        });
+
+        diffAndRevision.byteChange = new ByteChange(aggregateAddedCount, aggregateDeletedCount)
+        diffAndRevision.body.diff = filteredDiffs;
+    });
+
+    console.log(diffAndRevisions);
+}
+
 function getSignificantChanges2(req, res) {
+
+    const output = [];
+
+    // STEP 1: Gather list of article revisions
     return mwapi.queryForRevisions(req)
         .then( (response) => {
-            // eslint-disable-next-line no-console
-            console.log(response);
 
-            // hit compare endpoint for each revision
+            // STEP 2: All at once gather diffs for each uncached revision and list of talk page revisions
             const revisions = response.body.query.pages[0].revisions;
+            // todo: length error checking here, parentid check here
+            const nextRvStartId = revisions[revisions.length - 1].parentid;
 
-            // may be able to clean this up with map somehow http://bluebirdjs.com/docs/api/promise.map.html
+            const articleEvalResults = getCachedAndUncachedItems(revisions, req, talkPageTitle(req));
 
-            return BBPromise.map(revisions, function(revision) {
-                return diffPromise(req, revision.revid, revision.parentid);
+            // save cached article revisions to output
+            output.concat(articleEvalResults.cachedOutput);
+
+            const rvStart = revisions[0].timestamp;
+            // todo: length error checking here
+            const rvEnd = revisions[revisions.length - 1].timestamp;
+
+            return BBPromise.props({
+                articleDiffAndRevisions: diffAndRevisionPromises(req, articleEvalResults.uncachedRevisions),
+                talkPageRevisions: talkPageRevisionsPromise(req, rvStart, rvEnd),
+                nextRvStartId: nextRvStartId
             });
         })
         .then( (response) => {
-            // eslint-disable-next-line no-console
+
+            // STEP 3: All at once gather diffs for uncached talk page revisions
+
+            const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
+            const articleDiffAndRevisions = response.articleDiffAndRevisions;
+            const nextRvStartId = response.nextRvStartId;
+
+            const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions, req, null);
+
+            // save cached talk page revisions to output
+            output.concat(talkPageEvalResults.cachedOutput);
+
+            // for each uncached talk page revision, gather diffs
+            return diffAndRevisionPromises(req, talkPageEvalResults.uncachedRevisions)
+                .then( (response) => {
+                    return Object.assign({
+                        articleDiffAndRevisions: articleDiffAndRevisions,
+                        talkDiffAndRevisions: response,
+                        nextRvStartId: nextRvStartId
+                    });
+                });
+        })
+        .then( (response) => {
+
+            // Determine byte size of change for every diff line and aggregate for every revision
+            updateDiffAndRevisionsWithByteCount(response.articleDiffAndRevisions);
+
+            return response;
+        })
+        .then( (response) => {
+
             console.log(response);
+
+            const threshold = req.query.threshold === null || req.query.threshold === undefined ?
+                100 : req.query.threshold;
+
+            //segment off large changes and small changes
+            response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
+                if (diffAndRevision.byteChange.totalCount() <= threshold) {
+                    const revision = diffAndRevision.revision;
+                    const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp, "small-change");
+                    output.push(smallOutputObject);
+                    const cacheKey = significantChangesCacheKey(req, null, revision.revid);
+                    significantChangesCache[cacheKey] = smallOutputObject;
+                } else {
+                    const revision = diffAndRevision.revision;
+
+                    //get largest diff
+                    diffAndRevision.body.diff.sort(function(a, b) {
+                        return b.byteChange.totalCount() - a.byteChange.totalCount();
+                    });
+
+                    //todo: safety
+                    const largestDiffLine = diffAndRevision.body.diff[0];
+
+                    const largeOutputObject = new LargeOutput(revision.revid, revision.timestamp, "large-change", largestDiffLine.text);
+                    output.push(largeOutputObject);
+                    const cacheKey = significantChangesCacheKey(req, null, revision.revid);
+                    significantChangesCache[cacheKey] = largeOutputObject;
+                }
+            });
+
+            return output;
+        })
+        .then( (output) => {
+
+            console.log(output);
         });
 }
+
+
 
 function getSignificantChanges(req, res) {
     return BBPromise.props({
