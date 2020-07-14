@@ -21,30 +21,36 @@ const diffAndRevisionPromise = (req, revision) => {
         });
 };
 
-//curl -X POST "https://en.wikipedia.org/api/rest_v1/transform/wikitext/to/html/Dog" -H "accept: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/HTML/2.1.0"" -H "Content-Type: multipart/form-data" -F "wikitext='testing'" -F "body_only=true" -F "stash=true"
-//"https://en.wikipedia.org/api/rest_v1/transform/wikitext/to/html/Dog" -H "accept: text/html; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/HTML/2.1.0"" -H "Content-Type: multipart/form-data" -F "wikitext='testing'" -F "body_only=true" -F "stash=true"
-//wat console write
-/*
-{ method: 'get',
-  uri:
-   "https://en.wikipedia.org/w/rest.php/v1/revision/967289946/compare/967285956",
-  query: {},
-  headers: {},
-  body: undefined,
-  timeout: 60000 }
- */
+const snippetAndRevisionPromise = (req, largeChange) => {
+    const headers = Object.assign( {
+        accept: 'text/html',
+        profile: 'https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.0.0',
+        'content-type': 'multipart/form-data'
+    });
+    const formData = Object.assign({
+        wikitext: largeChange.snippet
+    });
 
-//call like req.issueRequest(wat);
-//then chain parsoidApi.mobileHTMLPromiseFromHTML
-// const snippetAndRevisionPromise = (app, req, res, html, revision) => {
-//     return mwrestapi.queryForDiff(req, revision.revid, revision.parentid)
-//         .then( (response) => {
-//             return Object.assign({
-//                 revision: revision,
-//                 body: response.body
-//             });
-//         });
-// };
+    const request = Object.assign({
+        method: 'post',
+        uri: `https://en.wikipedia.org/api/rest_v1/transform/wikitext/to/mobile-html/${req.params.title}`,
+        query: {},
+        headers: headers,
+        body: formData
+    });
+
+    return req.issueRequest(request)
+        .then( (response) => {
+            largeChange.snippet = response.body;
+            return largeChange;
+        });
+};
+
+const snippetAndRevisionPromises = (req, largeChanges) => {
+    return BBPromise.map(largeChanges, function(largeChange) {
+        return snippetAndRevisionPromise(req, largeChange);
+    });
+};
 
 const diffAndRevisionPromises = (req, revisions) => {
     return BBPromise.map(revisions, function(revision) {
@@ -98,18 +104,25 @@ class ByteChange {
 }
 
 class SmallOutput {
-    constructor(revid, timestamp, outputType) {
+    constructor(revid, timestamp) {
         this.revid = revid;
         this.timestamp = timestamp;
-        this.outputType = outputType;
+        this.outputType = "small-change";
+    }
+}
+
+class ConsolidatedSmallOutput {
+    constructor(count) {
+        this.count = count;
+        this.outputType = "small-change";
     }
 }
 
 class LargeOutput {
-    constructor(revid, timestamp, outputType, snippet) {
+    constructor(revid, timestamp, snippet) {
         this.revid = revid;
         this.timestamp = timestamp;
-        this.outputType = outputType;
+        this.outputType = "large-change";
         this.snippet = snippet;
     }
 }
@@ -168,6 +181,32 @@ function updateDiffAndRevisionsWithByteCount(diffAndRevisions) {
     });
 
     console.log(diffAndRevisions);
+}
+
+function collapseOutput(output) {
+
+    const collapsedOutput = [];
+    let numSmallChanges = 0;
+    output.forEach(function (revision) {
+        if (revision.outputType === 'small-change') {
+            numSmallChanges++;
+            return;
+        } else if (numSmallChanges > 0) {
+            const change = new ConsolidatedSmallOutput(numSmallChanges);
+            collapsedOutput.push(change);
+            numSmallChanges = 0;
+        }
+
+        collapsedOutput.push(revision);
+    });
+
+    if (numSmallChanges > 0) {
+        const change = new ConsolidatedSmallOutput(numSmallChanges);
+        collapsedOutput.push(change);
+        numSmallChanges = 0;
+    }
+
+    return collapsedOutput;
 }
 
 function getSignificantChanges2(req, res) {
@@ -239,7 +278,7 @@ function getSignificantChanges2(req, res) {
             response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
                 if (diffAndRevision.byteChange.totalCount() <= threshold) {
                     const revision = diffAndRevision.revision;
-                    const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp, "small-change");
+                    const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp);
                     output.push(smallOutputObject);
                     const cacheKey = significantChangesCacheKey(req, null, revision.revid);
                     significantChangesCache[cacheKey] = smallOutputObject;
@@ -254,7 +293,7 @@ function getSignificantChanges2(req, res) {
                     //todo: safety
                     const largestDiffLine = diffAndRevision.body.diff[0];
 
-                    const largeOutputObject = new LargeOutput(revision.revid, revision.timestamp, "large-change", largestDiffLine.text);
+                    const largeOutputObject = new LargeOutput(revision.revid, revision.timestamp, largestDiffLine.text);
                     output.push(largeOutputObject);
                     const cacheKey = significantChangesCacheKey(req, null, revision.revid);
                     significantChangesCache[cacheKey] = largeOutputObject;
@@ -265,11 +304,24 @@ function getSignificantChanges2(req, res) {
         })
         .then( (output) => {
 
-            console.log(output);
+            //convert large snippets from wikitext to mobile-html
+            const largeOutputs = output.filter(item => item.outputType === 'large-change');
+            return snippetAndRevisionPromises(req, largeOutputs)
+                .then( (response) => {
+                    return output;
+                });
+        })
+        .then( (convertedSnippetOutput) => {
+
+            console.log(convertedSnippetOutput);
+
+            //todo: should we sort output by timestamp here?
+
+            const collapsedOutput = collapseOutput(output);
+            res.send(collapsedOutput).end();
+
         });
 }
-
-
 
 function getSignificantChanges(req, res) {
     return BBPromise.props({
