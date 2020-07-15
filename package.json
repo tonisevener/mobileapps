@@ -54,6 +54,7 @@
   },
   "homepage": "https://www.mediawiki.org/wiki/RESTBase_services_for_apps",
   "dependencies": {
+    "@root/encoding": "^1.0.1",
     "sync-request": "^6.1.0",
     "banana-i18n": "^1.2.1",
     "bluebird": "^3.7.2",

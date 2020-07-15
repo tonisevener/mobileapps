@@ -6,13 +6,86 @@ const BBPromise = require('bluebird');
 const api = require('../../lib/api-util');
 const express = require('express');
 const parsoidApi = require('../../lib/parsoid-access');
+const encoding = require('@root/encoding');
 
 let app;
 
 const significantChangesCache = {};
 
+String.prototype.insert = function(index, string) {
+    if (index > 0) {
+        return this.substring(0, index) + string + this.substring(index, this.length);
+    }
+
+    return string + this;
+};
+
+class CharacterChange {
+    constructor(addedCount, deletedCount) {
+        this.addedCount = addedCount;
+        this.deletedCount = deletedCount;
+    }
+
+    totalCount() {
+        return this.addedCount + this.deletedCount;
+    }
+}
+
+class SmallOutput {
+    constructor(revid, timestamp, user, userid, characterChange) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'small-change';
+        this.user = user;
+        this.userid = userid;
+        this.characterChange = characterChange;
+    }
+}
+
+class ConsolidatedSmallOutput {
+    constructor(count) {
+        this.count = count;
+        this.outputType = 'small-change';
+    }
+}
+
+class LargeOutput {
+    constructor(largeOutputExpanded) {
+        this.revid = largeOutputExpanded.revid;
+        this.timestamp = largeOutputExpanded.timestamp;
+        this.outputType = 'large-change';
+        this.snippet = largeOutputExpanded.snippet;
+        this.user = largeOutputExpanded.user;
+        this.userid = largeOutputExpanded.userid;
+        this.characterChange = largeOutputExpanded.characterChange;
+        this.section = largeOutputExpanded.section;
+    }
+}
+
+class LargeOutputExpanded {
+    constructor(revid, timestamp, user, userid, snippet, type, highlightRanges, characterChange, section) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'large-change';
+        this.snippet = snippet;
+        this.type = type;
+        this.highlightRanges = highlightRanges;
+        this.user = user;
+        this.userid = userid;
+        this.characterChange = characterChange;
+        this.section = section;
+    }
+}
+
+class Section {
+    constructor(fromSection, toSection) {
+        this.fromSection = fromSection;
+        this.toSection = toSection;
+    }
+}
+
 const diffAndRevisionPromise = (req, revision) => {
-    return mwrestapi.queryForDiff(req, revision.revid, revision.parentid)
+    return mwrestapi.queryForDiff(req, revision.parentid, revision.revid)
         .then( (response) => {
             return Object.assign({
                 revision: revision,
@@ -21,14 +94,67 @@ const diffAndRevisionPromise = (req, revision) => {
         });
 };
 
-const snippetAndRevisionPromise = (req, largeChange) => {
+const snippetPromise = (req, largeChange) => {
     const headers = Object.assign( {
         accept: 'text/html',
         profile: 'https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.0.0',
-        'content-type': 'multipart/form-data'
+        'content-type': 'multipart/form-data',
+        'output-mode': 'editPreview'
     });
+
+    // add highlight delimiters first
+    var snippetBinary = encoding.strToBin(largeChange.snippet);
+
+    //todo: it looks like parsoid *sometimes* strips these spans out depending on their placement. we need some token that parsoid won't touch.
+    //see results for this revision, it's missing an add-highlight.
+    //https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=965295364&oldid=965071033
+    const addHighlightStart = '<span class=\"add-highlight\">';
+    const deleteHighlightStart = '<span class=\"delete-highlight\">';
+    const highlightEnd = '<\/span>';
+
+    const addHighlightStartBin = encoding.strToBin(addHighlightStart);
+    const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
+    const highlightEndBin = encoding.strToBin(highlightEnd);
+
+    switch (largeChange.type) {
+        case 1: // Added complete line
+            snippetBinary = snippetBinary.insert(0, addHighlightStartBin);
+            snippetBinary = snippetBinary.insert(snippetBinary.length, highlightEndBin);
+            break;
+        case 2: // Deleted complete line
+            snippetBinary = snippetBinary.insert(0, deleteHighlightStart);
+            snippetBinary = snippetBinary.insert(snippetBinary.length, highlightEndBin);
+            break;
+        case 5:
+        case 3: // Added and deleted words in line
+            var offset = 0;
+            largeChange.highlightRanges.forEach(function (range) {
+                switch (range.type) {
+                    case 0: // Added
+                        snippetBinary = snippetBinary.insert(range.start + offset, addHighlightStartBin);
+                        offset += addHighlightStartBin.length;
+                        break;
+                    case 1: // Deleted
+                        snippetBinary = snippetBinary.insert(range.start + offset, deleteHighlightStartBin);
+                        offset += deleteHighlightStartBin.length;
+                        break;
+                    default:
+                        return;
+                }
+                snippetBinary = snippetBinary.insert(range.start + offset + range.length, highlightEndBin);
+                offset += highlightEndBin.length;
+            });
+            break;
+        default:
+            break;
+    }
+
+    const newSnippet = encoding.binToStr(snippetBinary);
+
+    // make request to format to mobile-html, reassign result back to snippet
+
     const formData = Object.assign({
-        wikitext: largeChange.snippet
+        wikitext: newSnippet
     });
 
     const request = Object.assign({
@@ -41,14 +167,44 @@ const snippetAndRevisionPromise = (req, largeChange) => {
 
     return req.issueRequest(request)
         .then( (response) => {
-            largeChange.snippet = response.body;
+            return mUtil.createDocument(response.body);
+        }).then((response) => {
+
+            //removing script tags here
+            //todo: try to remove first section that is inserted too
+            const scripts = response.body.getElementsByTagName('script');
+            const scriptsList = Array.prototype.slice.call(scripts);
+            const references = response.body.getElementsByClassName('mw-references-wrap');
+            const referencesList = Array.prototype.slice.call(references);
+            const finalListToStrip = scriptsList.concat(referencesList);
+            finalListToStrip.forEach( (script) => {
+                script.parentNode.removeChild(script);
+            });
+
+            //mobile-html endpoint seems to return a wrapper pcs, section and paragraph element. strip these out as well.
+
+            var strippedSnippet = response.body.innerHTML;
+            const pcsElement = response.getElementById('pcs');
+            if (pcsElement) {
+                const sectionWrapper = pcsElement.firstChild;
+                if (sectionWrapper.tagName === 'SECTION') {
+                    strippedSnippet = sectionWrapper.innerHTML;
+                }
+
+                const paragraphWrapper = sectionWrapper.firstChild;
+                if (paragraphWrapper.tagName === 'P') {
+                    strippedSnippet = paragraphWrapper.innerHTML;
+                }
+            }
+
+            largeChange.snippet = strippedSnippet;
             return largeChange;
         });
 };
 
-const snippetAndRevisionPromises = (req, largeChanges) => {
+const snippetPromises = (req, largeChanges) => {
     return BBPromise.map(largeChanges, function(largeChange) {
-        return snippetAndRevisionPromise(req, largeChange);
+        return snippetPromise(req, largeChange);
     });
 };
 
@@ -59,7 +215,7 @@ const diffAndRevisionPromises = (req, revisions) => {
 };
 
 const talkPageTitle = (req) => {
-    return `Talk:${req.params.title}`
+    return `Talk:${req.params.title}`;
 };
 
 const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
@@ -68,7 +224,7 @@ const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
 
 const significantChangesCacheKey = (req, title, revision) => {
     const keyTitle = title || req.params.title;
-    return `${req.params.domain}-${title}-${revision.revid}`;
+    return `${req.params.domain}-${keyTitle}-${revision.revid}`;
 };
 
 function getCachedAndUncachedItems(revisions, req, title) {
@@ -92,43 +248,7 @@ function getCachedAndUncachedItems(revisions, req, title) {
     });
 }
 
-class ByteChange {
-    constructor(addedCount, deletedCount) {
-        this.addedCount = addedCount;
-        this.deletedCount = deletedCount;
-    }
-
-    totalCount() {
-        return this.addedCount + this.deletedCount;
-    }
-}
-
-class SmallOutput {
-    constructor(revid, timestamp) {
-        this.revid = revid;
-        this.timestamp = timestamp;
-        this.outputType = "small-change";
-    }
-}
-
-class ConsolidatedSmallOutput {
-    constructor(count) {
-        this.count = count;
-        this.outputType = "small-change";
-    }
-}
-
-class LargeOutput {
-    constructor(revid, timestamp, snippet) {
-        this.revid = revid;
-        this.timestamp = timestamp;
-        this.outputType = "large-change";
-        this.snippet = snippet;
-    }
-}
-
-function updateDiffAndRevisionsWithByteCount(diffAndRevisions) {
-    console.log(diffAndRevisions);
+function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
 
     // Loop through diffs, filter out type 0 (context type) and assign byte change properties to the remaining
 
@@ -150,15 +270,21 @@ function updateDiffAndRevisionsWithByteCount(diffAndRevisions) {
                 case 2: // Delete complete line type
                     lineDeletedCount = diff.text.length;
                     break;
+                case 5: //Move paragraph destination type (also has added and deleted ranges in line)
                 case 3: // Change line type (add and deleted ranges in line)
-                    //todo: there's something funky with added and deleted types. see United_States revid 966656680, says added 172 bytes (type 0 highlighted range) but UI shows deleted in desktop and app.
                     diff.highlightRanges.forEach(function (range) {
+
+                        const binaryText = encoding.strToBin(diff.text);
+                        const binaryRangeText = binaryText.substring(range.start, range.start + range.length);
+                        const rangeText = encoding.binToStr(binaryRangeText);
+                        const lengthToCalculate = rangeText.length;
+
                         switch (range.type) {
                             case 0: // Add range type
-                                lineAddedCount += range.length;
+                                lineAddedCount += lengthToCalculate;
                                 break;
                             case 1: // Delete range type
-                                lineDeletedCount += range.length;
+                                lineDeletedCount += lengthToCalculate;
                                 break;
                             default:
                                 break;
@@ -172,46 +298,120 @@ function updateDiffAndRevisionsWithByteCount(diffAndRevisions) {
             aggregateAddedCount += lineAddedCount;
             aggregateDeletedCount += lineDeletedCount;
 
-            diff.byteChange = new ByteChange(lineAddedCount, lineDeletedCount);
+            diff.characterChange = new CharacterChange(lineAddedCount, lineDeletedCount);
             filteredDiffs.push(diff);
         });
 
-        diffAndRevision.byteChange = new ByteChange(aggregateAddedCount, aggregateDeletedCount)
+        diffAndRevision.characterChange = new CharacterChange(aggregateAddedCount, aggregateDeletedCount);
         diffAndRevision.body.diff = filteredDiffs;
     });
-
-    console.log(diffAndRevisions);
 }
 
-function collapseOutput(output) {
+function getSectionForDiffLine(diffBody, diffLine) {
 
-    const collapsedOutput = [];
-    let numSmallChanges = 0;
-    output.forEach(function (revision) {
-        if (revision.outputType === 'small-change') {
-            numSmallChanges++;
-            return;
-        } else if (numSmallChanges > 0) {
-            const change = new ConsolidatedSmallOutput(numSmallChanges);
-            collapsedOutput.push(change);
-            numSmallChanges = 0;
+    var fromSection = null;
+    var toSection = null;
+
+    //capture intro
+    if (!diffBody.from.sections ||
+        diffBody.from.sections.length === 0 ||
+        !diffBody.to.sections ||
+        diffBody.to.sections.length === 0) {
+        return null;
+    }
+
+    if (diffLine.offset.from < diffBody.from.sections[0].offset) {
+        fromSection = 'Intro';
+    }
+
+    if (diffLine.offset.to < diffBody.to.sections[0].offset) {
+        toSection = 'Intro';
+    }
+
+    if (fromSection && toSection) {
+        return new Section(fromSection, toSection);
+    }
+
+    var prevSection = null;
+    if (!fromSection && diffLine.offset.from) {
+        for (let i = 0; i < diffBody.from.sections.length; i++) {
+            const section = diffBody.from.sections[i];
+
+            if (diffLine.offset.from < section.offset && prevSection) {
+                fromSection = prevSection.title;
+                break;
+            }
+
+            prevSection = section;
         }
 
-        collapsedOutput.push(revision);
+        if (!fromSection && diffLine.offset.from > 0) {
+            fromSection = prevSection.title;
+        }
+    }
+
+
+    if (!toSection && diffLine.offset.to) {
+        prevSection = null;
+        for (let i = 0; i < diffBody.to.sections.length; i++) {
+
+            const section = diffBody.to.sections[i];
+            if (diffLine.offset.to < section.offset && prevSection) {
+                toSection = prevSection.title;
+                break;
+            }
+
+            prevSection = section;
+        }
+
+        if (!toSection && diffLine.offset.to > 0) {
+            toSection = prevSection.title;
+        }
+    }
+
+    return new Section(fromSection, toSection);
+}
+
+function cleanOutput(output) {
+
+    //collapses small changes, converts large changes only to info needed
+
+    //sort by date first
+    output = output.sort(function(a, b) {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+
+    const cleanedOutput = [];
+    let numSmallChanges = 0;
+    output.forEach(function (item) {
+        if (item.outputType === 'small-change') {
+            numSmallChanges++;
+            return;
+        } else {
+            if (numSmallChanges > 0) {
+                const change = new ConsolidatedSmallOutput(numSmallChanges);
+                cleanedOutput.push(change);
+                numSmallChanges = 0;
+            }
+
+            if (item.outputType === 'large-change') {
+                cleanedOutput.push(new LargeOutput(item));
+            } else {
+                cleanedOutput.push(item);
+            }
+        }
     });
 
     if (numSmallChanges > 0) {
         const change = new ConsolidatedSmallOutput(numSmallChanges);
-        collapsedOutput.push(change);
+        cleanedOutput.push(change);
         numSmallChanges = 0;
     }
 
-    return collapsedOutput;
+    return cleanedOutput;
 }
 
 function getSignificantChanges2(req, res) {
-
-    const output = [];
 
     // STEP 1: Gather list of article revisions
     return mwapi.queryForRevisions(req)
@@ -222,10 +422,11 @@ function getSignificantChanges2(req, res) {
             // todo: length error checking here, parentid check here
             const nextRvStartId = revisions[revisions.length - 1].parentid;
 
-            const articleEvalResults = getCachedAndUncachedItems(revisions, req, talkPageTitle(req));
+            const articleEvalResults = getCachedAndUncachedItems(revisions, req, null);
 
-            // save cached article revisions to output
-            output.concat(articleEvalResults.cachedOutput);
+            // save cached article revisions to finalOutput
+            var finalOutput = [];
+            finalOutput = finalOutput.concat(articleEvalResults.cachedOutput);
 
             const rvStart = revisions[0].timestamp;
             // todo: length error checking here
@@ -234,7 +435,8 @@ function getSignificantChanges2(req, res) {
             return BBPromise.props({
                 articleDiffAndRevisions: diffAndRevisionPromises(req, articleEvalResults.uncachedRevisions),
                 talkPageRevisions: talkPageRevisionsPromise(req, rvStart, rvEnd),
-                nextRvStartId: nextRvStartId
+                nextRvStartId: nextRvStartId,
+                finalOutput: finalOutput
             });
         })
         .then( (response) => {
@@ -245,10 +447,10 @@ function getSignificantChanges2(req, res) {
             const articleDiffAndRevisions = response.articleDiffAndRevisions;
             const nextRvStartId = response.nextRvStartId;
 
-            const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions, req, null);
+            const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions, req, talkPageTitle(req));
 
             // save cached talk page revisions to output
-            output.concat(talkPageEvalResults.cachedOutput);
+            const finalOutput = response.finalOutput.concat(talkPageEvalResults.cachedOutput);
 
             // for each uncached talk page revision, gather diffs
             return diffAndRevisionPromises(req, talkPageEvalResults.uncachedRevisions)
@@ -256,69 +458,71 @@ function getSignificantChanges2(req, res) {
                     return Object.assign({
                         articleDiffAndRevisions: articleDiffAndRevisions,
                         talkDiffAndRevisions: response,
-                        nextRvStartId: nextRvStartId
+                        nextRvStartId: nextRvStartId,
+                        finalOutput: finalOutput
                     });
                 });
         })
         .then( (response) => {
 
-            // Determine byte size of change for every diff line and aggregate for every revision
-            updateDiffAndRevisionsWithByteCount(response.articleDiffAndRevisions);
+            // Determine character size of change for every diff line and aggregate for every revision
+            updateDiffAndRevisionsWithCharacterCount(response.articleDiffAndRevisions);
 
             return response;
         })
         .then( (response) => {
 
-            console.log(response);
-
             const threshold = req.query.threshold === null || req.query.threshold === undefined ?
                 100 : req.query.threshold;
 
-            //segment off large changes and small changes
+            // segment off large changes and small changes
+            var uncachedOutput = [];
             response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
-                if (diffAndRevision.byteChange.totalCount() <= threshold) {
+                if (diffAndRevision.characterChange.totalCount() <= threshold) {
                     const revision = diffAndRevision.revision;
-                    const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp);
-                    output.push(smallOutputObject);
-                    const cacheKey = significantChangesCacheKey(req, null, revision.revid);
-                    significantChangesCache[cacheKey] = smallOutputObject;
+                    const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp, revision.user, revision.userid, diffAndRevision.characterChange);
+                    uncachedOutput.push(smallOutputObject);
                 } else {
                     const revision = diffAndRevision.revision;
 
-                    //get largest diff
+                    // get largest diff
                     diffAndRevision.body.diff.sort(function(a, b) {
-                        return b.byteChange.totalCount() - a.byteChange.totalCount();
+                        return b.characterChange.totalCount() - a.characterChange.totalCount();
                     });
 
-                    //todo: safety
+                    // todo: safety
                     const largestDiffLine = diffAndRevision.body.diff[0];
-
-                    const largeOutputObject = new LargeOutput(revision.revid, revision.timestamp, largestDiffLine.text);
-                    output.push(largeOutputObject);
-                    const cacheKey = significantChangesCacheKey(req, null, revision.revid);
-                    significantChangesCache[cacheKey] = largeOutputObject;
+                    const diffSection = getSectionForDiffLine(diffAndRevision.body, largestDiffLine);
+                    const largeOutputObject = new LargeOutputExpanded(revision.revid, revision.timestamp, revision.user, revision.userid, largestDiffLine.text, largestDiffLine.type, largestDiffLine.highlightRanges, diffAndRevision.characterChange, diffSection);
+                    uncachedOutput.push(largeOutputObject);
                 }
             });
 
-            return output;
+            return Object.assign({ nextRvStartId: response.nextRvStartId, uncachedOutput: uncachedOutput, finalOutput: response.finalOutput } );
         })
-        .then( (output) => {
+        .then( (response) => {
 
-            //convert large snippets from wikitext to mobile-html
-            const largeOutputs = output.filter(item => item.outputType === 'large-change');
-            return snippetAndRevisionPromises(req, largeOutputs)
-                .then( (response) => {
-                    return output;
+            // convert large snippets from wikitext to mobile-html
+            const largeOutputs = response.uncachedOutput.filter(item => item.outputType === 'large-change');
+            return snippetPromises(req, largeOutputs)
+                .then( (snippetResponse) => {
+
+                    //push to final output and cache
+                    //note we are using original response list, not snippet response (snippet only contains large)
+                    response.uncachedOutput.forEach((item) => {
+                        response.finalOutput.push(item);
+                        const cacheKey = significantChangesCacheKey(req, null, item);
+                        significantChangesCache[cacheKey] = item;
+                    });
+
+                    return Object.assign({ nextRvStartId: response.nextRvStartId, finalOutput: response.finalOutput } );
                 });
         })
-        .then( (convertedSnippetOutput) => {
+        .then( (response) => {
 
-            console.log(convertedSnippetOutput);
-
-            //todo: should we sort output by timestamp here?
-
-            const collapsedOutput = collapseOutput(output);
-            res.send(collapsedOutput).end();
+            const cleanedOutput = cleanOutput(response.finalOutput);
+            const result = Object.assign({ nextRvStartId: response.nextRvStartId, significantChanges: cleanedOutput } );
+            res.send(result).end();
 
         });
 }
@@ -470,18 +674,18 @@ function getSignificantChanges(req, res) {
 
                 changedLines.forEach(function (diff) {
                     if (diff.type === 1 || diff.type === 2) {
-                        diff.byteChange = diff.text.length;
+                        diff.characterChange = diff.text.length;
                     } else {
-                        var byteChange = 0;
+                        var characterChange = 0;
                         diff.highlightRanges.forEach(function (range) {
-                           byteChange += range.length;
+                           characterChange += range.length;
                         });
 
-                        diff.byteChange = byteChange;
+                        diff.characterChange = characterChange;
                     }
                 });
                 changedLines.sort(function(a, b) {
-                    return b.byteChange - a.byteChange;
+                    return b.characterChange - a.characterChange;
                 });
                 if (changedLines.length > 0) {
                     var changeType;
