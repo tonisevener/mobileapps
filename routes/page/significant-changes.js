@@ -77,6 +77,11 @@ class Section {
     }
 }
 
+function getThreshold(req) {
+    return req.query.threshold === null || req.query.threshold === undefined ?
+        100 : req.query.threshold;
+}
+
 function insertSubstringInString(originalString, substring, index) {
     if (index > 0) {
         return originalString.substring(0, index) + substring + originalString.substring(index,
@@ -120,6 +125,14 @@ const snippetPromise = (req, largeChange) => {
     const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
     const highlightEndBin = encoding.strToBin(highlightEnd);
 
+    // const addHighlightTokenStart = 'ios-add-token';
+    // const deleteHighlightTokenStart = 'ios-delete-token';
+    // const highlightTokenEnd = 'ios-end-token';
+    //
+    // const addHighlightTokenStartBin = encoding.strToBin(addHighlightTokenStart);
+    // const deleteHighlightTokenStartBin = encoding.strToBin(deleteHighlightTokenStart);
+    // const highlightTokenEndBin = encoding.strToBin(highlightTokenEnd);
+
     switch (largeChange.type) {
         case 1: // Added complete line
 
@@ -129,7 +142,7 @@ const snippetPromise = (req, largeChange) => {
             break;
         case 2: // Deleted complete line
 
-            snippetBinary = insertSubstringInString(snippetBinary, deleteHighlightStart, 0);
+            snippetBinary = insertSubstringInString(snippetBinary, deleteHighlightStartBin, 0);
             snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
                 snippetBinary.length);
             break;
@@ -206,7 +219,14 @@ const snippetPromise = (req, largeChange) => {
 
                 const paragraphWrapper = sectionWrapper.firstChild;
                 if (paragraphWrapper.tagName === 'P') {
-                    strippedSnippet = paragraphWrapper.innerHTML;
+
+                    var parent = paragraphWrapper.parentNode;
+                    while ( paragraphWrapper.firstChild ) {
+                        parent.insertBefore(  paragraphWrapper.firstChild, paragraphWrapper );
+                    }
+                    parent.removeChild( paragraphWrapper );
+
+                    strippedSnippet = sectionWrapper.innerHTML;
                 }
             }
 
@@ -236,8 +256,9 @@ const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
 };
 
 const significantChangesCacheKey = (req, title, revision) => {
+    const threshold = getThreshold(req);
     const keyTitle = title || req.params.title;
-    return `${req.params.domain}-${keyTitle}-${revision.revid}`;
+    return `${req.params.domain}-${keyTitle}-${revision.revid}-${threshold}`;
 };
 
 function getCachedAndUncachedItems(revisions, req, title) {
@@ -493,8 +514,7 @@ function getSignificantChanges2(req, res) {
         })
         .then( (response) => {
 
-            const threshold = req.query.threshold === null || req.query.threshold === undefined ?
-                100 : req.query.threshold;
+            const threshold = getThreshold(req);
 
             // segment off large changes and small changes
             var uncachedOutput = [];
