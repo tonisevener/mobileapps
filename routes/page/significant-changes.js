@@ -41,6 +41,17 @@ class ConsolidatedSmallOutput {
     }
 }
 
+class VandalismOutput {
+    constructor(revid, timestamp, user, userid, section) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'vandalism-revert';
+        this.user = user;
+        this.userid = userid;
+        this.section = section;
+    }
+}
+
 class LargeOutput {
     constructor(largeOutputExpanded) {
         this.revid = largeOutputExpanded.revid;
@@ -70,10 +81,31 @@ class LargeOutputExpanded {
     }
 }
 
-class Section {
-    constructor(fromSection, toSection) {
-        this.fromSection = fromSection;
-        this.toSection = toSection;
+class NewTalkPageTopicExtended {
+    constructor(revid, timestamp, user, userid, snippet, type, highlightRanges, characterChange,
+                section) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'new-talk-page-topic';
+        this.snippet = snippet;
+        this.type = type;
+        this.highlightRanges = highlightRanges;
+        this.user = user;
+        this.userid = userid;
+        this.characterChange = characterChange;
+        this.section = section;
+    }
+}
+
+class NewTalkPageTopic {
+    constructor(newTalkPageTopicExpanded) {
+        this.revid = newTalkPageTopicExpanded.revid;
+        this.timestamp = newTalkPageTopicExpanded.timestamp;
+        this.outputType = 'new-talk-page-topic';
+        this.snippet = newTalkPageTopicExpanded.snippet;
+        this.user = newTalkPageTopicExpanded.user;
+        this.userid = newTalkPageTopicExpanded.userid;
+        this.section = newTalkPageTopicExpanded.section;
     }
 }
 
@@ -109,72 +141,71 @@ const snippetPromise = (req, largeChange) => {
         'output-mode': 'editPreview'
     });
 
-    // add highlight delimiters first
-    var snippetBinary = encoding.strToBin(largeChange.snippet);
+    var newSnippet;
 
-    // todo: it looks like parsoid *sometimes* strips these spans out depending on their placement.
-    // we need some token that parsoid won't touch.
-    // see results for this revision, it's missing an add-highlight.
-    // https://en.wikipedia.org/w/index.php?title=United_States
-    // &type=revision&diff=965295364&oldid=965071033
-    const addHighlightStart = '<span class="add-highlight">';
-    const deleteHighlightStart = '<span class="delete-highlight">';
-    const highlightEnd = '</span>';
+    if (largeChange.outputType === 'large-change') {
+        // add highlight delimiters first
+        var snippetBinary = encoding.strToBin(largeChange.snippet);
 
-    const addHighlightStartBin = encoding.strToBin(addHighlightStart);
-    const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
-    const highlightEndBin = encoding.strToBin(highlightEnd);
+        // todo: it looks like parsoid *sometimes* strips these spans out
+        //  depending on their placement.
+        // we need some token that parsoid won't touch.
+        // see results for this revision, it's missing an add-highlight.
+        // https://en.wikipedia.org/w/index.php?title=United_States
+        // &type=revision&diff=965295364&oldid=965071033
+        const addHighlightStart = '<span class="add-highlight">';
+        const deleteHighlightStart = '<span class="delete-highlight">';
+        const highlightEnd = '</span>';
 
-    // const addHighlightTokenStart = 'ios-add-token';
-    // const deleteHighlightTokenStart = 'ios-delete-token';
-    // const highlightTokenEnd = 'ios-end-token';
-    //
-    // const addHighlightTokenStartBin = encoding.strToBin(addHighlightTokenStart);
-    // const deleteHighlightTokenStartBin = encoding.strToBin(deleteHighlightTokenStart);
-    // const highlightTokenEndBin = encoding.strToBin(highlightTokenEnd);
+        const addHighlightStartBin = encoding.strToBin(addHighlightStart);
+        const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
+        const highlightEndBin = encoding.strToBin(highlightEnd);
 
-    switch (largeChange.type) {
-        case 1: // Added complete line
+        switch (largeChange.type) {
+            case 1: // Added complete line
 
-            snippetBinary = insertSubstringInString(snippetBinary, addHighlightStartBin, 0);
-            snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                snippetBinary.length);
-            break;
-        case 2: // Deleted complete line
-
-            snippetBinary = insertSubstringInString(snippetBinary, deleteHighlightStartBin, 0);
-            snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                snippetBinary.length);
-            break;
-        case 5:
-        case 3: // Added and deleted words in line
-            var offset = 0;
-            largeChange.highlightRanges.forEach(function (range) {
-                switch (range.type) {
-                    case 0: // Added
-                        snippetBinary = insertSubstringInString(snippetBinary,
-                            addHighlightStartBin, range.start + offset);
-                        offset += addHighlightStartBin.length;
-                        break;
-                    case 1: // Deleted
-                        snippetBinary = insertSubstringInString(snippetBinary,
-                            deleteHighlightStartBin, range.start + offset);
-                        offset += deleteHighlightStartBin.length;
-                        break;
-                    default:
-                        return;
-                }
-
+                snippetBinary = insertSubstringInString(snippetBinary, addHighlightStartBin, 0);
                 snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                    range.start + offset + range.length);
-                offset += highlightEndBin.length;
-            });
-            break;
-        default:
-            break;
-    }
+                    snippetBinary.length);
+                break;
+            case 2: // Deleted complete line
 
-    const newSnippet = encoding.binToStr(snippetBinary);
+                snippetBinary = insertSubstringInString(snippetBinary, deleteHighlightStartBin, 0);
+                snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
+                    snippetBinary.length);
+                break;
+            case 5:
+            case 3: // Added and deleted words in line
+                var offset = 0;
+                largeChange.highlightRanges.forEach(function (range) {
+                    switch (range.type) {
+                        case 0: // Added
+                            snippetBinary = insertSubstringInString(snippetBinary,
+                                addHighlightStartBin, range.start + offset);
+                            offset += addHighlightStartBin.length;
+                            break;
+                        case 1: // Deleted
+                            snippetBinary = insertSubstringInString(snippetBinary,
+                                deleteHighlightStartBin, range.start + offset);
+                            offset += deleteHighlightStartBin.length;
+                            break;
+                        default:
+                            return;
+                    }
+
+                    snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
+                        range.start + offset + range.length);
+                    offset += highlightEndBin.length;
+                });
+                break;
+            default:
+                break;
+        }
+
+        newSnippet = encoding.binToStr(snippetBinary);
+    } else { // new talk page topic
+        newSnippet = largeChange.snippet;
+    }
 
     // make request to format to mobile-html, reassign result back to snippet
 
@@ -218,7 +249,7 @@ const snippetPromise = (req, largeChange) => {
                 }
 
                 const paragraphWrapper = sectionWrapper.firstChild;
-                if (paragraphWrapper.tagName === 'P') {
+                if (paragraphWrapper && paragraphWrapper.tagName === 'P') {
 
                     var parent = paragraphWrapper.parentNode;
                     while ( paragraphWrapper.firstChild ) {
@@ -265,6 +296,14 @@ function getCachedAndUncachedItems(revisions, req, title) {
     // add cache to output and filter out of processing flow
     const uncachedRevisions = [];
     const cachedOutput = [];
+
+    if (!revisions) {
+        return Object.assign({
+            uncachedRevisions: [],
+            cachedOutput: []
+        });
+    }
+
     revisions.forEach(function (revision) {
 
         const cacheKey = significantChangesCacheKey(req, title, revision);
@@ -346,29 +385,81 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
     });
 }
 
+function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
+
+     const newSectionTalkPageDiffAndRevisions = [];
+    // const talkPage = talkPageBody.query.pages;
+    // const talkPageObject = talkPage[Object.keys(talkPage)[0]];
+    // const talkPageRevisions = talkPageObject.revisions;
+    talkDiffAndRevisions.forEach(function (diffAndRevision, index) {
+         if (diffAndRevision.revision.comment.toLowerCase().includes('new section')
+             && diffAndRevision.revision.userid !== 4936590) { // don't show signbot topics
+             // see if this section was reverted in previous iterations
+             var wasReverted = false;
+             if (index - 1 > 0) {
+                 var nextDiffAndRevision = talkDiffAndRevisions[index - 1];
+                 if (nextDiffAndRevision.revision.userid === 4936590) { // signbot,
+                     // look for next revision
+                     if (index - 2 > 0) {
+                         nextDiffAndRevision = talkDiffAndRevisions[index - 2];
+                     }
+                 }
+                 if (nextDiffAndRevision.revision.tags.includes('mw-undo') ||
+                     nextDiffAndRevision.revision.tags.includes('mw-rollback')) {
+                     wasReverted = true;
+                 }
+             }
+             if (wasReverted === false) {
+                 newSectionTalkPageDiffAndRevisions.push(diffAndRevision);
+             }
+         }
+     });
+
+    return newSectionTalkPageDiffAndRevisions;
+}
+
+function getLargestDiffLine(diffBody) {
+    diffBody.diff.sort(function(a, b) {
+        return b.characterChange.totalCount() - a.characterChange.totalCount();
+    });
+
+    // todo: safety
+    const largestDiffLine = diffBody.diff[0];
+    return largestDiffLine;
+}
+
 function getSectionForDiffLine(diffBody, diffLine) {
 
     var fromSection = null;
     var toSection = null;
 
     // capture intro
-    if (!diffBody.from.sections ||
-        diffBody.from.sections.length === 0 ||
-        !diffBody.to.sections ||
-        diffBody.to.sections.length === 0) {
+    if ((!diffBody.from.sections ||
+        diffBody.from.sections.length === 0) &&
+        (!diffBody.to.sections ||
+        diffBody.to.sections.length === 0)) {
         return null;
     }
 
-    if (diffLine.offset.from && diffLine.offset.from < diffBody.from.sections[0].offset) {
+    // diffLine.offset.from of = is still valid if it's at the very beginning of the article.
+    // In this case javascript evaluates diffLine.offset.from to false,
+    // hence the need for the separate check.
+    if ((diffLine.offset.from || diffLine.offset.from === 0) &&
+        diffLine.offset.from < diffBody.from.sections[0].offset) {
         fromSection = 'Intro';
     }
 
-    if (diffLine.offset.to && diffLine.offset.to < diffBody.to.sections[0].offset) {
+    if ((diffLine.offset.to || diffLine.offset.to === 0) &&
+        diffLine.offset.to < diffBody.to.sections[0].offset) {
         toSection = 'Intro';
     }
 
     if (fromSection && toSection) {
-        return new Section(fromSection, toSection);
+        if (diffLine.offset.to && diffLine.offset.to.length > 0) {
+            return toSection;
+        } else {
+            return fromSection;
+        }
     }
 
     var prevSection = null;
@@ -407,7 +498,18 @@ function getSectionForDiffLine(diffBody, diffLine) {
         }
     }
 
-    return new Section(fromSection, toSection);
+    if (diffLine.offset.to) {
+        return toSection;
+    } else {
+        return fromSection;
+    }
+}
+
+function getSectionForLargestDiffLine(diffBody, largestDiffLine) {
+    // get largest diff
+    const diffSection = getSectionForDiffLine(diffBody,
+        largestDiffLine);
+    return diffSection;
 }
 
 function cleanOutput(output) {
@@ -434,6 +536,8 @@ function cleanOutput(output) {
 
             if (item.outputType === 'large-change') {
                 cleanedOutput.push(new LargeOutput(item));
+            } else if (item.outputType === 'new-talk-page-topic') {
+                cleanedOutput.push(new NewTalkPageTopic(item));
             } else {
                 cleanedOutput.push(item);
             }
@@ -467,6 +571,8 @@ function getSignificantChanges2(req, res) {
             var finalOutput = [];
             finalOutput = finalOutput.concat(articleEvalResults.cachedOutput);
 
+            // todo: unfortunately this cuts out new talk page topics that appeared after
+            //  the latest article revision. rethink this piece.
             const rvStart = revisions[0].timestamp;
             // todo: length error checking here
             const rvEnd = revisions[revisions.length - 1].timestamp;
@@ -509,6 +615,7 @@ function getSignificantChanges2(req, res) {
             // Determine character size of change for every diff line and aggregate
             // for every revision
             updateDiffAndRevisionsWithCharacterCount(response.articleDiffAndRevisions);
+            updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
 
             return response;
         })
@@ -516,32 +623,49 @@ function getSignificantChanges2(req, res) {
 
             const threshold = getThreshold(req);
 
-            // segment off large changes and small changes
+            // segment off into types
             var uncachedOutput = [];
             response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
-                if (diffAndRevision.characterChange.totalCount() <= threshold) {
-                    const revision = diffAndRevision.revision;
+                const revision = diffAndRevision.revision;
+                if (revision.tags.includes('mw-rollback') &&
+                    revision.comment.toLowerCase().includes('revert') &&
+                    revision.comment.toLowerCase().includes('vandalism')) {
+                    const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
+                    const section = getSectionForLargestDiffLine(diffAndRevision.body,
+                        largestDiffLine);
+                    const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
+                        revision.timestamp, revision.user, revision.userid, section);
+                    uncachedOutput.push(vandalismRevertOutputObject);
+                } else if (diffAndRevision.characterChange.totalCount() <= threshold) {
                     const smallOutputObject = new SmallOutput(revision.revid, revision.timestamp,
                         revision.user, revision.userid, diffAndRevision.characterChange);
                     uncachedOutput.push(smallOutputObject);
                 } else {
-                    const revision = diffAndRevision.revision;
-
-                    // get largest diff
-                    diffAndRevision.body.diff.sort(function(a, b) {
-                        return b.characterChange.totalCount() - a.characterChange.totalCount();
-                    });
-
-                    // todo: safety
-                    const largestDiffLine = diffAndRevision.body.diff[0];
-                    const diffSection = getSectionForDiffLine(diffAndRevision.body,
+                    const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
+                    const section = getSectionForLargestDiffLine(diffAndRevision.body,
                         largestDiffLine);
                     const largeOutputObject = new LargeOutputExpanded(revision.revid,
                         revision.timestamp, revision.user, revision.userid, largestDiffLine.text,
                         largestDiffLine.type, largestDiffLine.highlightRanges,
-                        diffAndRevision.characterChange, diffSection);
+                        diffAndRevision.characterChange, section);
                     uncachedOutput.push(largeOutputObject);
                 }
+            });
+
+            // get new talk page revisions, add to uncachedOutput. it will be sorted later.
+            const newTopicDiffAndRevisions = getNewTopicDiffAndRevisions(
+                response.talkDiffAndRevisions);
+            newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
+                const revision = diffAndRevision.revision;
+                // todo: better check might be something like get first diff line
+                //  that doesn't have a section title or empty line.
+                const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
+                const section = getSectionForLargestDiffLine(diffAndRevision.body, largestDiffLine);
+                const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(revision.revid,
+                    revision.timestamp, revision.user, revision.userid, largestDiffLine.text,
+                    largestDiffLine.type, largestDiffLine.highlightRanges,
+                    diffAndRevision.characterChange, section);
+                uncachedOutput.push(newTalkPageTopicOutputObject);
             });
 
             return Object.assign({ nextRvStartId: response.nextRvStartId,
@@ -551,7 +675,7 @@ function getSignificantChanges2(req, res) {
 
             // convert large snippets from wikitext to mobile-html
             const largeOutputs = response.uncachedOutput.filter(item =>
-                item.outputType === 'large-change');
+                item.outputType === 'large-change' || item.outputType === 'new-talk-page-topic');
             return snippetPromises(req, largeOutputs)
                 .then( (snippetResponse) => {
 
@@ -560,7 +684,13 @@ function getSignificantChanges2(req, res) {
                     // (snippet only contains large)
                     response.uncachedOutput.forEach((item) => {
                         response.finalOutput.push(item);
-                        const cacheKey = significantChangesCacheKey(req, null, item);
+                        var cacheKey;
+                        if (item.outputType === 'new-talk-page-topic') {
+                            const title = talkPageTitle(req);
+                            cacheKey = significantChangesCacheKey(req, title, item);
+                        } else {
+                            cacheKey = significantChangesCacheKey(req, null, item);
+                        }
                         significantChangesCache[cacheKey] = item;
                     });
 
