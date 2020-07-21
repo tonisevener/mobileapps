@@ -53,6 +53,18 @@ class VandalismOutput {
     }
 }
 
+class NewReference {
+    constructor(revid, timestamp, user, userid, section, templates) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'new-reference';
+        this.user = user;
+        this.userid = userid;
+        this.section = section;
+        this.templates = templates;
+    }
+}
+
 class LargeOutput {
     constructor(largeOutputExpanded) {
         this.revid = largeOutputExpanded.revid;
@@ -134,7 +146,7 @@ const diffAndRevisionPromise = (req, revision) => {
         });
 };
 
-const snippetPromise = (req, largeChange) => {
+const snippetPromise = (req, snippetOutput) => {
     const headers = Object.assign( {
         accept: 'text/html',
         profile: 'https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.0.0',
@@ -144,9 +156,9 @@ const snippetPromise = (req, largeChange) => {
 
     var newSnippet;
 
-    if (largeChange.outputType === 'large-change') {
+    if (snippetOutput.outputType === 'large-change') {
         // add highlight delimiters first
-        var snippetBinary = encoding.strToBin(largeChange.snippet);
+        var snippetBinary = encoding.strToBin(snippetOutput.snippet);
 
         // todo: it looks like parsoid *sometimes* strips these spans out
         //  depending on their placement.
@@ -162,7 +174,7 @@ const snippetPromise = (req, largeChange) => {
         const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
         const highlightEndBin = encoding.strToBin(highlightEnd);
 
-        switch (largeChange.type) {
+        switch (snippetOutput.type) {
             case 1: // Added complete line
 
                 snippetBinary = insertSubstringInString(snippetBinary, addHighlightStartBin, 0);
@@ -178,7 +190,7 @@ const snippetPromise = (req, largeChange) => {
             case 5:
             case 3: // Added and deleted words in line
                 var offset = 0;
-                largeChange.highlightRanges.forEach(function (range) {
+                snippetOutput.highlightRanges.forEach(function (range) {
                     switch (range.type) {
                         case 0: // Added
                             snippetBinary = insertSubstringInString(snippetBinary,
@@ -205,7 +217,7 @@ const snippetPromise = (req, largeChange) => {
 
         newSnippet = encoding.binToStr(snippetBinary);
     } else { // new talk page topic
-        newSnippet = largeChange.snippet;
+        newSnippet = snippetOutput.snippet;
     }
 
     // make request to format to mobile-html, reassign result back to snippet
@@ -262,14 +274,14 @@ const snippetPromise = (req, largeChange) => {
                 }
             }
 
-            largeChange.snippet = strippedSnippet;
-            return largeChange;
+            snippetOutput.snippet = strippedSnippet;
+            return snippetOutput;
         });
 };
 
-const snippetPromises = (req, largeChanges) => {
-    return BBPromise.map(largeChanges, function(largeChange) {
-        return snippetPromise(req, largeChange);
+const snippetPromises = (req, snippetOutputs) => {
+    return BBPromise.map(snippetOutputs, function(snippetOutput) {
+        return snippetPromise(req, snippetOutput);
     });
 };
 
@@ -386,11 +398,29 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
     });
 }
 
-function structuredParsoidResultPromise(text, revision) {
+function templateNamesToCallOut() {
+    return ['cite'];
+}
+
+function needsToParseForAddedTemplates(text, includeOpeningBraces) {
+    const names = templateNamesToCallOut();
+    for (var n = 0; n < names.length; n++) {
+        const name = names[n];
+
+        if ((text.includes(`{{${name}`) && includeOpeningBraces) || (text.includes(`${name}`) && !includeOpeningBraces)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function structuredTemplatePromise(text, diff, revision) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
             var pdoc = yield ParsoidJS.parse(text, { pdoc: true });
-            const splitTemplates = yield PRFunPromise.map(pdoc.filterTemplates(), ParsoidJS.toWikitext);
+            const splitTemplates = yield PRFunPromise.map(pdoc.filterTemplates(),
+                ParsoidJS.toWikitext);
             var templateObjects = [];
 
             for (var s = 0; s < splitTemplates.length; s++) {
@@ -401,8 +431,12 @@ function structuredParsoidResultPromise(text, revision) {
                 for (var i = 0; i < individualTemplates.length; i++) {
                     const template = individualTemplates[i];
 
+                    if (!needsToParseForAddedTemplates(template.name, false)) {
+                        continue;
+                    }
+
                     var dict = {};
-                    dict['name'] = template.name;
+                    dict.name = template.name;
                     for (var p = 0; p < template.params.length; p++) {
                         const param = template.params[p].name;
                         const value = yield template.get(param).value.toWikitext();
@@ -411,32 +445,28 @@ function structuredParsoidResultPromise(text, revision) {
                     templateObjects.push(dict);
                 }
             }
-
-            resolve(templateObjects);
+            const result = Object.assign( {
+               revision: revision,
+                diff: diff,
+               templates: templateObjects
+            });
+            resolve(result);
         });
 
         main().done();
     });
 }
 
-function needsToParseForAddedTemplates(text) {
-    return text.includes('{{');
-}
-
-function structuredParsoidResultPromises(diffAndRevisions) {
-    // Loop through added sections in diffs and detect template types
-
+function addStructuredTemplates(diffAndRevisions) {
     var promises = [];
     diffAndRevisions.forEach(function (diffAndRevision) {
         diffAndRevision.body.diff.forEach(function (diff) {
 
             switch (diff.type) {
                 case 1: // Add complete line type
-                    if (needsToParseForAddedTemplates(diff.text)) {
-                        //{{cite web |url=http://www.mla.org/map_data |title=United States |publisher=[[Modern Language Association]]|access-date=September 2, 2013}}
-                        //{{cite web |url=http://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_10_1YR_B16001&prodType=table |title=American FactFinder—Results |first=U.S. Census |last=Bureau |publisher= |access-date=May 29, 2017 |archive-url=https://archive.today/20200212213140/http://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_10_1YR_B16001&prodType=table |archive-date=February 12, 2020 |url-status=dead }}
-                        //{{efn|Source: 2015 [[American Community Survey]], [[U.S. Census Bureau]]. Most respondents who speak a language other than English at home also report speaking English "well" or "very well". For the language groups listed above, the strongest English-language proficiency is among speakers of German (96% report that they speak English "well" or "very well"), followed by speakers of French (93.5%), Tagalog (92.8%), Spanish (74.1%), Korean (71.5%), Chinese (70.4%), and Vietnamese (66.9%).}}
-                        promises.push(structuredParsoidResultPromise(diff.text, diffAndRevision.revision));
+                    if (needsToParseForAddedTemplates(diff.text, true)) {
+                        promises.push(structuredTemplatePromise(diff.text, diff,
+                            diffAndRevision.revision));
                     }
                     break;
                 case 5:
@@ -450,14 +480,16 @@ function structuredParsoidResultPromises(diffAndRevisions) {
 
                         switch (range.type) {
                             case 0: // Add range type
-                                if (needsToParseForAddedTemplates(rangeText)) {
-                                    promises.push(structuredParsoidResultPromise(rangeText, diffAndRevision.revision));
+                                if (needsToParseForAddedTemplates(rangeText, true)) {
+                                    promises.push(structuredTemplatePromise(rangeText, diff,
+                                        diffAndRevision.revision));
                                 }
                                 break;
                             default:
                                 break;
                         }
                     });
+                    break;
                 default:
                     break;
             }
@@ -467,13 +499,15 @@ function structuredParsoidResultPromises(diffAndRevisions) {
     return Promise.all(promises)
         .then( (response) => {
 
-           //assign pdoc to diffAndRevision;
-            diffAndRevisions.forEach(function (diffAndRevision) {
-                response.forEach(function (parseResponse) {
-                    if (diffAndRevision.revision.revid === parseResponse.revision.revid) {
-                        diffAndRevision.pdoc = parseResponse.pdoc;
-                    }
-                });
+           // loop through responses, add to revision.
+
+            response.forEach( (item) => {
+               diffAndRevisions.forEach( (diffAndRevision) => {
+                  if (item.revision.revid === diffAndRevision.revision.revid) {
+                      diffAndRevision.templates = item.templates;
+                      diffAndRevision.templateDiffLine = item.diff;
+                  }
+               });
             });
 
             return diffAndRevisions;
@@ -713,8 +747,9 @@ function getSignificantChanges(req, res) {
             updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
 
             // Flag added template types
-            return structuredParsoidResultPromises(response.articleDiffAndRevisions)
+            return addStructuredTemplates(response.articleDiffAndRevisions)
                 .then( (articleDiffAndRevisions) => {
+                    response.articleDiffAndRevisions = articleDiffAndRevisions;
                     return response;
                 });
         })
@@ -726,7 +761,19 @@ function getSignificantChanges(req, res) {
             var uncachedOutput = [];
             response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
                 const revision = diffAndRevision.revision;
-                if (revision.tags.includes('mw-rollback') &&
+                if (diffAndRevision.templates && diffAndRevision.templates.length > 0) {
+
+                    var section = null;
+                    if (diffAndRevision.templateDiffLine) {
+                        section = getSectionForDiffLine(diffAndRevision.body,
+                            diffAndRevision.templateDiffLine);
+                    }
+                    const newReferenceOutputObject = new NewReference(revision.revid,
+                        revision.timestamp, revision.user, revision.userid, section,
+                        diffAndRevision.templates);
+
+                    uncachedOutput.push(newReferenceOutputObject);
+                } else if (revision.tags.includes('mw-rollback') &&
                     revision.comment.toLowerCase().includes('revert') &&
                     revision.comment.toLowerCase().includes('vandalism')) {
                     const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
@@ -773,9 +820,9 @@ function getSignificantChanges(req, res) {
         .then( (response) => {
 
             // convert large snippets from wikitext to mobile-html
-            const largeOutputs = response.uncachedOutput.filter(item =>
+            const snippetOutputs = response.uncachedOutput.filter(item =>
                 item.outputType === 'large-change' || item.outputType === 'new-talk-page-topic');
-            return snippetPromises(req, largeOutputs)
+            return snippetPromises(req, snippetOutputs)
                 .then( (snippetResponse) => {
 
                     // push to final output and cache
