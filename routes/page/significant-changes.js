@@ -106,6 +106,28 @@ class LargeOutputExpanded {
     }
 }
 
+class NewTalkPageTopicExtraExtended {
+    constructor(revision, snippet, type, highlightRanges, characterChange,
+                section) {
+        this.revision = revision;
+        this.outputType = 'new-talk-page-topic-extra';
+        this.snippet = snippet;
+        this.type = type;
+        this.highlightRanges = highlightRanges;
+        this.characterChange = characterChange;
+        this.section = section;
+    }
+}
+
+class NewTalkPageTopicExtra {
+    constructor(item) {
+        this.revision = item.revision;
+        this.outputType = 'new-talk-page-topic-extra';
+        this.snippet = item.snippet;
+        this.section = item.section;
+    }
+}
+
 class NewTalkPageTopicExtended {
     constructor(revid, timestamp, user, userid, snippet, type, highlightRanges, characterChange,
                 section) {
@@ -667,6 +689,10 @@ function cleanOutput(output) {
 
     // sort by date first
     output = output.sort(function(a, b) {
+        if (a.outputType === 'new-talk-page-topic-extra') {
+            return new Date(b.revision.timestamp) - new Date(a.revision.timestamp);
+        }
+
         return new Date(b.timestamp) - new Date(a.timestamp);
     });
 
@@ -687,6 +713,8 @@ function cleanOutput(output) {
                 cleanedOutput.push(new LargeOutput(item));
             } else if (item.outputType === 'new-talk-page-topic') {
                 cleanedOutput.push(new NewTalkPageTopic(item));
+            } else if (item.outputType === 'new-talk-page-topic-extra') {
+                cleanedOutput.push(new NewTalkPageTopicExtra(item));
             } else {
                 cleanedOutput.push(item);
             }
@@ -948,6 +976,84 @@ function getAddedTemplates(req, res) {
         });
 }
 
+function getNewTalkTopics(req, res) {
+
+    // STEP 1: Gather list of article revisions
+    return mwapi.queryForRevisions(req, talkPageTitle(req), req.query.pageSize)
+        .then( (response) => {
+
+            const talkPageRevisions = response.body.query.pages[0].revisions;
+            const nextRvStartId = talkPageRevisions[talkPageRevisions.length - 1].parentid;
+
+            var finalOutput = [];
+
+            const talkEvalResults = Object.assign({
+                uncachedRevisions: talkPageRevisions,
+                cachedOutput: []
+            });
+
+            return BBPromise.props({
+                talkDiffAndRevisions: diffAndRevisionPromises(req,
+                    talkEvalResults.uncachedRevisions),
+                nextRvStartId: nextRvStartId,
+                finalOutput: finalOutput
+            });
+        })
+        .then( (response) => {
+
+            updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
+
+            // segment off into types
+            var uncachedOutput = [];
+
+            // get new talk page revisions, add to uncachedOutput. it will be sorted later.
+            const newTopicDiffAndRevisions = getNewTopicDiffAndRevisions(
+                response.talkDiffAndRevisions);
+            newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
+                const revision = diffAndRevision.revision;
+                // todo: better check might be something like get first diff line
+                //  that doesn't have a section title or empty line.
+                const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
+                const section = getSectionForLargestDiffLine(diffAndRevision.body, largestDiffLine);
+                const newTalkPageTopicOutputObject = new NewTalkPageTopicExtraExtended(revision,
+                    largestDiffLine.text,
+                    largestDiffLine.type, largestDiffLine.highlightRanges,
+                    diffAndRevision.characterChange, section);
+                uncachedOutput.push(newTalkPageTopicOutputObject);
+            });
+
+            return Object.assign({ nextRvStartId: response.nextRvStartId,
+                uncachedOutput: uncachedOutput, finalOutput: response.finalOutput } );
+        })
+        .then( (response) => {
+
+            // convert large snippets from wikitext to mobile-html
+            const snippetOutputs = response.uncachedOutput.filter(item =>
+                item.outputType === 'new-talk-page-topic-extra');
+            return snippetPromises(req, snippetOutputs)
+                .then( (snippetResponse) => {
+
+                    // push to final output and cache
+                    // note we are using original response list, not snippet response
+                    // (snippet only contains large)
+                    response.uncachedOutput.forEach((item) => {
+                        response.finalOutput.push(item);
+                    });
+
+                    return Object.assign({ nextRvStartId: response.nextRvStartId,
+                        finalOutput: response.finalOutput } );
+                });
+        })
+        .then( (response) => {
+
+            const cleanedOutput = cleanOutput(response.finalOutput);
+            const result = Object.assign({ nextRvStartId: response.nextRvStartId,
+                significantChanges: cleanedOutput } );
+            res.send(result).end();
+
+        });
+}
+
 router.get('/page/significant-changes/:title', (req, res) => {
     // res.status(200);
     return getSignificantChanges(req, res);
@@ -959,6 +1065,14 @@ router.get('/page/significant-changes/:title', (req, res) => {
 router.get('/page/added-templates/:title', (req, res) => {
     // res.status(200);
     return getAddedTemplates(req, res);
+    // const result = Object.assign({ result: "What up new endpoint."});
+    // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
+    // res.json(result).end();
+});
+
+router.get('/page/new-talk-topics/:title', (req, res) => {
+    // res.status(200);
+    return getNewTalkTopics(req, res);
     // const result = Object.assign({ result: "What up new endpoint."});
     // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
     // res.json(result).end();
