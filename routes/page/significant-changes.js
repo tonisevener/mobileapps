@@ -7,7 +7,8 @@ const api = require('../../lib/api-util');
 const express = require('express');
 const parsoidApi = require('../../lib/parsoid-access');
 const encoding = require('@root/encoding');
-
+const ParsoidJS = require('parsoid-jsapi');
+const PRFunPromise = require('prfun');
 let app;
 
 const significantChangesCache = {};
@@ -385,6 +386,100 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
     });
 }
 
+function structuredParsoidResultPromise(text, revision) {
+    return new BBPromise((resolve) => {
+        var main = PRFunPromise.async(function*() {
+            var pdoc = yield ParsoidJS.parse(text, { pdoc: true });
+            const splitTemplates = yield PRFunPromise.map(pdoc.filterTemplates(), ParsoidJS.toWikitext);
+            var templateObjects = [];
+
+            for (var s = 0; s < splitTemplates.length; s++) {
+                const splitTemplateText = splitTemplates[s];
+
+                const innerPdoc = yield ParsoidJS.parse(splitTemplateText, { pdoc: true });
+                const individualTemplates = innerPdoc.filterTemplates();
+                for (var i = 0; i < individualTemplates.length; i++) {
+                    const template = individualTemplates[i];
+
+                    var dict = {};
+                    dict['name'] = template.name;
+                    for (var p = 0; p < template.params.length; p++) {
+                        const param = template.params[p].name;
+                        const value = yield template.get(param).value.toWikitext();
+                        dict[param] = value;
+                    }
+                    templateObjects.push(dict);
+                }
+            }
+
+            resolve(templateObjects);
+        });
+
+        main().done();
+    });
+}
+
+function needsToParseForAddedTemplates(text) {
+    return text.includes('{{');
+}
+
+function structuredParsoidResultPromises(diffAndRevisions) {
+    // Loop through added sections in diffs and detect template types
+
+    var promises = [];
+    diffAndRevisions.forEach(function (diffAndRevision) {
+        diffAndRevision.body.diff.forEach(function (diff) {
+
+            switch (diff.type) {
+                case 1: // Add complete line type
+                    if (needsToParseForAddedTemplates(diff.text)) {
+                        //{{cite web |url=http://www.mla.org/map_data |title=United States |publisher=[[Modern Language Association]]|access-date=September 2, 2013}}
+                        //{{cite web |url=http://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_10_1YR_B16001&prodType=table |title=American FactFinder—Results |first=U.S. Census |last=Bureau |publisher= |access-date=May 29, 2017 |archive-url=https://archive.today/20200212213140/http://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_10_1YR_B16001&prodType=table |archive-date=February 12, 2020 |url-status=dead }}
+                        //{{efn|Source: 2015 [[American Community Survey]], [[U.S. Census Bureau]]. Most respondents who speak a language other than English at home also report speaking English "well" or "very well". For the language groups listed above, the strongest English-language proficiency is among speakers of German (96% report that they speak English "well" or "very well"), followed by speakers of French (93.5%), Tagalog (92.8%), Spanish (74.1%), Korean (71.5%), Chinese (70.4%), and Vietnamese (66.9%).}}
+                        promises.push(structuredParsoidResultPromise(diff.text, diffAndRevision.revision));
+                    }
+                    break;
+                case 5:
+                case 3:
+                    diff.highlightRanges.forEach(function (range) {
+
+                        const binaryText = encoding.strToBin(diff.text);
+                        const binaryRangeText = binaryText.substring(range.start,
+                            range.start + range.length);
+                        const rangeText = encoding.binToStr(binaryRangeText);
+
+                        switch (range.type) {
+                            case 0: // Add range type
+                                if (needsToParseForAddedTemplates(rangeText)) {
+                                    promises.push(structuredParsoidResultPromise(rangeText, diffAndRevision.revision));
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                    });
+                default:
+                    break;
+            }
+        });
+    });
+
+    return Promise.all(promises)
+        .then( (response) => {
+
+           //assign pdoc to diffAndRevision;
+            diffAndRevisions.forEach(function (diffAndRevision) {
+                response.forEach(function (parseResponse) {
+                    if (diffAndRevision.revision.revid === parseResponse.revision.revid) {
+                        diffAndRevision.pdoc = parseResponse.pdoc;
+                    }
+                });
+            });
+
+            return diffAndRevisions;
+        });
+}
+
 function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
 
      const newSectionTalkPageDiffAndRevisions = [];
@@ -617,7 +712,11 @@ function getSignificantChanges(req, res) {
             updateDiffAndRevisionsWithCharacterCount(response.articleDiffAndRevisions);
             updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
 
-            return response;
+            // Flag added template types
+            return structuredParsoidResultPromises(response.articleDiffAndRevisions)
+                .then( (articleDiffAndRevisions) => {
+                    return response;
+                });
         })
         .then( (response) => {
 
