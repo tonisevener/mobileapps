@@ -65,6 +65,18 @@ class NewReference {
     }
 }
 
+class AddedTemplate {
+    constructor(revid, timestamp, user, userid, section, templates) {
+        this.revid = revid;
+        this.timestamp = timestamp;
+        this.outputType = 'added-template';
+        this.user = user;
+        this.userid = userid;
+        this.section = section;
+        this.templates = templates;
+    }
+}
+
 class LargeOutput {
     constructor(largeOutputExpanded) {
         this.revid = largeOutputExpanded.revid;
@@ -402,8 +414,16 @@ function templateNamesToCallOut() {
     return ['cite'];
 }
 
-function needsToParseForAddedTemplates(text, includeOpeningBraces) {
+function needsToParseForAddedTemplates(text, includeOpeningBraces, includeAll) {
     const names = templateNamesToCallOut();
+
+    if (includeAll) {
+        if ((text.includes('{{') && includeOpeningBraces) || (!includeOpeningBraces)) {
+            return true;
+        }
+        return false;
+    }
+
     for (var n = 0; n < names.length; n++) {
         const name = names[n];
 
@@ -415,7 +435,7 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
     return false;
 }
 
-function structuredTemplatePromise(text, diff, revision) {
+function structuredTemplatePromise(text, diff, revision, includeAll) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
             var pdoc = yield ParsoidJS.parse(text, { pdoc: true });
@@ -431,7 +451,7 @@ function structuredTemplatePromise(text, diff, revision) {
                 for (var i = 0; i < individualTemplates.length; i++) {
                     const template = individualTemplates[i];
 
-                    if (!needsToParseForAddedTemplates(template.name, false)) {
+                    if (!needsToParseForAddedTemplates(template.name, false, includeAll)) {
                         continue;
                     }
 
@@ -457,14 +477,14 @@ function structuredTemplatePromise(text, diff, revision) {
     });
 }
 
-function addStructuredTemplates(diffAndRevisions) {
+function addStructuredTemplates(diffAndRevisions, includeAll) {
     var promises = [];
     diffAndRevisions.forEach(function (diffAndRevision) {
         diffAndRevision.body.diff.forEach(function (diff) {
 
             switch (diff.type) {
                 case 1: // Add complete line type
-                    if (needsToParseForAddedTemplates(diff.text, true)) {
+                    if (needsToParseForAddedTemplates(diff.text, true, includeAll)) {
                         promises.push(structuredTemplatePromise(diff.text, diff,
                             diffAndRevision.revision));
                     }
@@ -480,9 +500,9 @@ function addStructuredTemplates(diffAndRevisions) {
 
                         switch (range.type) {
                             case 0: // Add range type
-                                if (needsToParseForAddedTemplates(rangeText, true)) {
+                                if (needsToParseForAddedTemplates(rangeText, true, includeAll)) {
                                     promises.push(structuredTemplatePromise(rangeText, diff,
-                                        diffAndRevision.revision));
+                                        diffAndRevision.revision, includeAll));
                                 }
                                 break;
                             default:
@@ -747,7 +767,7 @@ function getSignificantChanges(req, res) {
             updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
 
             // Flag added template types
-            return addStructuredTemplates(response.articleDiffAndRevisions)
+            return addStructuredTemplates(response.articleDiffAndRevisions, false)
                 .then( (articleDiffAndRevisions) => {
                     response.articleDiffAndRevisions = articleDiffAndRevisions;
                     return response;
@@ -854,9 +874,91 @@ function getSignificantChanges(req, res) {
         });
 }
 
+function getAddedTemplates(req, res) {
+
+    // STEP 1: Gather list of article revisions
+    return mwapi.queryForRevisions(req, null, req.query.pageSize)
+        .then( (response) => {
+
+            // STEP 2: All at once gather diffs for each uncached revision and list of
+            // talk page revisions
+            const revisions = response.body.query.pages[0].revisions;
+            const nextRvStartId = revisions[revisions.length - 1].parentid;
+            var finalOutput = [];
+
+            const articleEvalResults = Object.assign({
+                uncachedRevisions: revisions,
+                cachedOutput: []
+            });
+
+            return BBPromise.props({
+                articleDiffAndRevisions: diffAndRevisionPromises(req,
+                    articleEvalResults.uncachedRevisions),
+                nextRvStartId: nextRvStartId,
+                finalOutput: finalOutput
+            });
+        })
+        .then( (response) => {
+
+            // Flag added template types
+            return addStructuredTemplates(response.articleDiffAndRevisions, true)
+                .then( (articleDiffAndRevisions) => {
+                    response.articleDiffAndRevisions = articleDiffAndRevisions;
+                    return response;
+                });
+        })
+        .then( (response) => {
+
+            // segment off into types
+            var uncachedOutput = [];
+            response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
+                const revision = diffAndRevision.revision;
+                if (diffAndRevision.templates && diffAndRevision.templates.length > 0) {
+
+                    var section = null;
+                    if (diffAndRevision.templateDiffLine) {
+                        section = getSectionForDiffLine(diffAndRevision.body,
+                            diffAndRevision.templateDiffLine);
+                    }
+                    const addedTemplateOutputObject = new AddedTemplate(revision.revid,
+                        revision.timestamp, revision.user, revision.userid, section,
+                        diffAndRevision.templates);
+
+                    uncachedOutput.push(addedTemplateOutputObject);
+                }
+            });
+            return Object.assign({ nextRvStartId: response.nextRvStartId,
+                uncachedOutput: uncachedOutput, finalOutput: response.finalOutput } );
+        })
+        .then( (response) => {
+
+            response.uncachedOutput.forEach((item) => {
+                response.finalOutput.push(item);
+            });
+
+            return Object.assign({ nextRvStartId: response.nextRvStartId,
+                finalOutput: response.finalOutput } );
+        })
+        .then( (response) => {
+
+            const cleanedOutput = cleanOutput(response.finalOutput);
+            const result = Object.assign({ nextRvStartId: response.nextRvStartId,
+                significantChanges: cleanedOutput } );
+            res.send(result).end();
+        });
+}
+
 router.get('/page/significant-changes/:title', (req, res) => {
     // res.status(200);
     return getSignificantChanges(req, res);
+    // const result = Object.assign({ result: "What up new endpoint."});
+    // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
+    // res.json(result).end();
+});
+
+router.get('/page/added-templates/:title', (req, res) => {
+    // res.status(200);
+    return getAddedTemplates(req, res);
     // const result = Object.assign({ result: "What up new endpoint."});
     // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
     // res.json(result).end();
