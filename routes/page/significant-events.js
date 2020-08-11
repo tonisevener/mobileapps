@@ -530,7 +530,7 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
         const aggregateCounts = new CharacterChange(aggregateAddedCount, aggregateDeletedCount);
         diffAndRevision.characterChangeWithSections = new CharacterChangeWithSections(
             aggregateCounts, Array.from(aggregateAddedSections),
-            Array.from(aggregateAddedSections));
+            Array.from(aggregateDeletedSections));
         diffAndRevision.body.diff = filteredDiffs;
     });
 }
@@ -561,6 +561,10 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces, includeAll) {
     return false;
 }
 
+// BUG: https://en.wikipedia.org/w/index.php?title=United_States&type=revision
+// &diff=965295364&oldid=965071033
+// We are missing some an added reference from line 722. We also aren't
+// catching the <ref> tags in line 579
 function structuredTemplatePromise(text, diff, revision, includeAll) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
