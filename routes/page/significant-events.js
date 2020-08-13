@@ -83,6 +83,7 @@ class AddedTextOutput {
     constructor(addedTextOutputExpanded) {
         this.outputType = addedTextOutputExpanded.outputType;
         this.snippet = addedTextOutputExpanded.snippet;
+        this.snippetType = addedTextOutputExpanded.snippetType;
         this.characterCount = addedTextOutputExpanded.characterCount;
         this.sections = addedTextOutputExpanded.sections;
     }
@@ -172,6 +173,12 @@ function insertSubstringInString(originalString, substring, index) {
     return substring + originalString;
 }
 
+function stringByRemovingSubstring(originalString, beginningIndex, endIndex) {
+    const firstSubstring = originalString.substring(0,beginningIndex);
+    const secondSubstring = originalString.substring(endIndex);
+    return firstSubstring + secondSubstring;
+}
+
 const diffAndRevisionPromise = (req, revision) => {
     return mwrestapi.queryForDiff(req, revision.parentid, revision.revid)
         .then( (response) => {
@@ -182,7 +189,8 @@ const diffAndRevisionPromise = (req, revision) => {
         });
 };
 
-const snippetPromise = (req, preformattedSnippet) => {
+const formattedSnippetFromTextPromise = (req, text) => {
+
     const headers = Object.assign( {
         accept: 'text/html',
         profile: 'https://www.mediawiki.org/wiki/Specs/Mobile-HTML/1.0.0',
@@ -190,82 +198,8 @@ const snippetPromise = (req, preformattedSnippet) => {
         'output-mode': 'editPreview'
     });
 
-    var newSnippet;
-
-    if (preformattedSnippet.outputType === 'large-change') {
-        // add highlight delimiters first
-        var snippetBinary = encoding.strToBin(preformattedSnippet.snippet);
-
-        // todo: it looks like parsoid *sometimes* strips these spans out
-        //  depending on their placement.
-        // we need some token that parsoid won't touch.
-        // see results for this revision, it's missing an add-highlight.
-        // https://en.wikipedia.org/w/index.php?title=United_States
-        // &type=revision&diff=965295364&oldid=965071033
-        // after looking at this, highlighted text that was added were references / new citations.
-        // Parsoid turns it into a basic superscript citation number and strips out any highlighting
-        // but using ~~~addhighlightstart~~~ instead of <span class='add-highlight'> does seem to
-        // shift the delimiters less. still doesn't solve above revision 965295364 issue though.
-        const addHighlightStart = '~~~addhighlightstart~~~';
-        const deleteHighlightStart = '~~~deletehighlightstart~~~';
-        const highlightEnd = '~~~highlightend~~~';
-
-        const addHighlightStartBin = encoding.strToBin(addHighlightStart);
-        const deleteHighlightStartBin = encoding.strToBin(deleteHighlightStart);
-        const highlightEndBin = encoding.strToBin(highlightEnd);
-
-        switch (preformattedSnippet.snippetType) {
-            case 1: // Added complete line
-
-                snippetBinary = insertSubstringInString(snippetBinary, addHighlightStartBin,
-                    0);
-                snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                    snippetBinary.length);
-                break;
-            case 2: // Deleted complete line
-
-                snippetBinary = insertSubstringInString(snippetBinary, deleteHighlightStartBin,
-                    0);
-                snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                    snippetBinary.length);
-                break;
-            case 5:
-            case 3: // Added and deleted words in line
-                var offset = 0;
-                preformattedSnippet.snippetHighlightRanges.forEach(function (range) {
-                    switch (range.type) {
-                        case 0: // Added
-                            snippetBinary = insertSubstringInString(snippetBinary,
-                                addHighlightStartBin, range.start + offset);
-                            offset += addHighlightStartBin.length;
-                            break;
-                        case 1: // Deleted
-                            snippetBinary = insertSubstringInString(snippetBinary,
-                                deleteHighlightStartBin, range.start + offset);
-                            offset += deleteHighlightStartBin.length;
-                            break;
-                        default:
-                            return;
-                    }
-
-                    snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
-                        range.start + offset + range.length);
-                    offset += highlightEndBin.length;
-                });
-                break;
-            default:
-                break;
-        }
-
-        newSnippet = encoding.binToStr(snippetBinary);
-    } else { // new talk page topic
-        newSnippet = preformattedSnippet.snippet;
-    }
-
-    // make request to format to mobile-html, reassign result back to snippet
-
     const formData = Object.assign({
-        wikitext: newSnippet
+        wikitext: text
     });
 
     const request = Object.assign({
@@ -314,9 +248,141 @@ const snippetPromise = (req, preformattedSnippet) => {
 
                     strippedSnippet = sectionWrapper.innerHTML;
                 }
+
+                // todo: remove monte tags from sectionWrapper
+            } else {
+                // todo: remove monte tags from body
             }
 
-            preformattedSnippet.snippet = strippedSnippet;
+            return strippedSnippet;
+        });
+};
+
+const snippetPromise = (req, preformattedSnippet) => {
+
+    if (preformattedSnippet.snippetType === 2) {
+        // deleted complete line type.
+        // we shouldn't get here but gracefully return null for snippet without trying to
+        // format
+        preformattedSnippet.snippet = null;
+        return preformattedSnippet;
+    }
+
+    var strippedSnippet;
+    const addHighlightStart = 'ioshighlightstart';
+    const highlightEnd = 'ioshighlightend';
+
+    const addHighlightStartBin = encoding.strToBin(addHighlightStart);
+    const highlightEndBin = encoding.strToBin(highlightEnd);
+
+    // strip deleted ranges from snippet
+    // add added delimiters to type 3 & 5 snippet (Added and deleted words in line)
+    // delimiters are later used for truncation starting point
+    if (preformattedSnippet.outputType === 'large-change') {
+        var snippetBinary = encoding.strToBin(preformattedSnippet.snippet);
+        switch (preformattedSnippet.snippetType) {
+            case 1: // Added complete line
+                break;
+            case 2: // Deleted complete line
+                // should be caught earlier
+                break;
+            case 5:
+            case 3: // Added and deleted words in line
+
+                // first strip deleted text
+                for (var d = preformattedSnippet.snippetHighlightRanges.length - 1; d >= 0; d-- ) {
+                    const range = preformattedSnippet.snippetHighlightRanges[d];
+
+                    switch (range.type) {
+                        case 0: // Added
+                            break;
+                        case 1: // Deleted
+                            snippetBinary = stringByRemovingSubstring(snippetBinary, range.start,
+                                range.start + range.length);
+
+                            for (var i = d; i < preformattedSnippet.snippetHighlightRanges.length;
+                                 i++) {
+                                const iRange = preformattedSnippet.snippetHighlightRanges[i];
+                                switch (iRange.type) {
+                                    case 0: // Added
+                                        iRange.start -= range.length;
+                                        preformattedSnippet.snippetHighlightRanges[i] = iRange;
+                                        break;
+                                    case 1: // Deleted
+                                        break;
+                                    default:
+                                        break;
+                                }
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                }
+
+                // filter out deleted ranges
+                // eslint-disable-next-line no-case-declarations
+                const addedHighlightRanges = preformattedSnippet.snippetHighlightRanges
+                    .filter(range => range.type === 0);
+
+                // then add added text delimiters
+                var addOffset = 0;
+                addedHighlightRanges.forEach(function (range) {
+                    switch (range.type) {
+                        case 0: // Added
+                            snippetBinary = insertSubstringInString(snippetBinary,
+                                addHighlightStartBin, range.start + addOffset);
+                            addOffset += addHighlightStartBin.length;
+                            break;
+                        case 1: // Deleted
+                            break;
+                        default:
+                            break;
+                    }
+
+                    snippetBinary = insertSubstringInString(snippetBinary, highlightEndBin,
+                        range.start + addOffset + range.length);
+                    addOffset += highlightEndBin.length;
+                });
+                break;
+            default:
+                break;
+        }
+
+        strippedSnippet = encoding.binToStr(snippetBinary);
+    } else { // new talk page topic
+        strippedSnippet = preformattedSnippet.snippet;
+    }
+
+    // make request to format to mobile-html, reassign result back to snippet
+    return formattedSnippetFromTextPromise(req, strippedSnippet)
+        .then( (response) => {
+            // truncate snippet if needed
+            // note: there's an interesting case where the existence of the delimiters changes the
+            // output. In this case being next to
+            // a wikitext link caused Parsoid to think that this was a new wikitext article
+            // rather than an existing one. I'm forging ahead as I think the worst that could
+            // happen is a missing link
+            // but if other issues occur, we should remove delimiters. With that we would lose
+            // all possibility of stretch goal highlighting
+            // and truncation
+            var truncatedSnippet = response;
+            if (preformattedSnippet.snippetType === 5 || preformattedSnippet.snippetType === 3) {
+                // try to trim the areas before the first ioshighlightstart and after the last
+                // ioshighlight start so snippet is
+                // focused on area that changed
+                const firstStart = response.indexOf('ioshighlightstart');
+                const lastStart = response.lastIndexOf('ioshighlightend');
+                if (firstStart >= 0 && lastStart >= 0) {
+                    truncatedSnippet = truncatedSnippet.slice(firstStart);
+                    truncatedSnippet = truncatedSnippet.slice(0, lastStart);
+                    // UNCOMMENT THIS LINE IF HIGHLIGHTING IS NOT WORTH IT
+                    // truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '')
+                    // .replace(/ioshighlightend/g, '');
+                    truncatedSnippet = '...'.concat(truncatedSnippet).concat('...');
+                }
+            }
+            preformattedSnippet.snippet = truncatedSnippet;
             return preformattedSnippet;
         });
 };
@@ -675,6 +741,8 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
     // const talkPageRevisions = talkPageObject.revisions;
     talkDiffAndRevisions.forEach(function (diffAndRevision, index) {
          if (diffAndRevision.revision.comment.toLowerCase().includes('new section')
+             && !diffAndRevision.revision.comment.toLowerCase()
+                 .includes('semi-protected edit request') // don't show semi-protected edit requests
              && diffAndRevision.revision.userid !== 4936590) { // don't show signbot topics
              // see if this section was reverted in previous iterations
              var wasReverted = false;
@@ -710,11 +778,39 @@ function getLargestDiffLine(diffBody) {
     return largestDiffLine;
 }
 
-function getSectionForLargestDiffLine(diffBody, largestDiffLine) {
-    // get largest diff
-    const diffSection = getSectionForDiffLine(diffBody,
-        largestDiffLine);
-    return diffSection;
+function getLargestDiffLineOfAdded(diffBody) {
+    diffBody.diff.sort(function(a, b) {
+        return b.characterChange.addedCount - a.characterChange.addedCount;
+    });
+
+    // todo: safety
+    const largestDiffLine = diffBody.diff[0];
+    return largestDiffLine;
+}
+
+function textContainsEmptyLineOrSection(text) {
+    const trimmedText = text.trim();
+    return (trimmedText.length === 0 || text.includes('=='));
+}
+
+function getFirstDiffLineWithContent(diffBody) {
+
+    for (let i = 0; i < diffBody.diff.length; i++) {
+        const diff = diffBody.diff[i];
+
+        switch (diff.type) {
+            case 0: // Context line type
+                continue;
+            default:
+                if (textContainsEmptyLineOrSection(diff.text)) {
+                    continue;
+                } else {
+                    return diff;
+                }
+        }
+    }
+
+    return null;
 }
 
 function cleanOutput(output) {
@@ -775,10 +871,12 @@ function getSignificantEvents(req, res) {
             // save cached article revisions to finalOutput
             const finalOutput = articleEvalResults.cachedOutput;
 
-            // todo: unfortunately this cuts out new talk page topics that appeared after
-            //  the latest article revision. rethink this piece.
-            const rvStart = revisions[0].timestamp;
-            // todo: length error checking here
+            const rvStart = (req.query.rvstartid !== undefined && req.query.rvstartid !== null) ?
+                revisions[0].timestamp : null;
+            // if rvstartid is missing from query, they are fetching the first page
+            // if they are fetching the first page, we don't want to block of
+            // talk page revision fetching at the start, in case talk page topics came in
+            // after the latest article revision
             const rvEnd = revisions[revisions.length - 1].timestamp;
 
             return BBPromise.props({
@@ -840,8 +938,9 @@ function getSignificantEvents(req, res) {
                     revision.comment.toLowerCase().includes('revert') &&
                     revision.comment.toLowerCase().includes('vandalism')) {
                     const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
-                    const section = getSectionForLargestDiffLine(diffAndRevision.body,
+                    const section = getSectionForDiffLine(diffAndRevision.body,
                         largestDiffLine);
+                    // todo: vandalism type can have reversions in multiple sections
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
                         revision.timestamp, revision.user, revision.userid, section);
                     uncachedOutput.push(vandalismRevertOutputObject);
@@ -868,8 +967,7 @@ function getSignificantEvents(req, res) {
                         threshold) {
 
                         if (diffAndRevision.characterChangeWithSections.counts.addedCount > 0) {
-                            const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
-                            // todo: get largest diff line of ADDED, do not include delete
+                            const largestDiffLine = getLargestDiffLineOfAdded(diffAndRevision.body);
                             const addedTextOutputObject = new AddedTextOutputExpanded(
                                 diffAndRevision.characterChangeWithSections, largestDiffLine.text,
                                 largestDiffLine.type, largestDiffLine.highlightRanges);
@@ -900,13 +998,12 @@ function getSignificantEvents(req, res) {
                 response.talkDiffAndRevisions);
             newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
                 const revision = diffAndRevision.revision;
-                // todo: better check might be something like get first diff line
-                //  that doesn't have a section title or empty line.
-                const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
-                const section = getSectionForLargestDiffLine(diffAndRevision.body, largestDiffLine);
+                const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
+                const section = getSectionForDiffLine(diffAndRevision.body,
+                    firstDiffLine);
                 const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(revision.revid,
-                    revision.timestamp, revision.user, revision.userid, largestDiffLine.text,
-                    largestDiffLine.type, largestDiffLine.highlightRanges,
+                    revision.timestamp, revision.user, revision.userid, firstDiffLine.text,
+                    firstDiffLine.type, firstDiffLine.highlightRanges,
                     diffAndRevision.characterChangeWithSections.counts, section);
                 uncachedOutput.push(newTalkPageTopicOutputObject);
             });
@@ -924,7 +1021,6 @@ function getSignificantEvents(req, res) {
                         null);
                     preformattedSnippets.push(snippet);
                 } else if (item.outputType === 'large-change') {
-
                     for (let i = 0; i < item.significantChanges.length; i++) {
                         const significantChange = item.significantChanges[i];
                         if (significantChange.outputType === 'added-text') {
