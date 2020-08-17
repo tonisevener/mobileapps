@@ -9,6 +9,7 @@ const parsoidApi = require('../../lib/parsoid-access');
 const encoding = require('@root/encoding');
 const ParsoidJS = require('parsoid-jsapi');
 const PRFunPromise = require('prfun');
+const tUtil = require('../../lib/talk/TalkPageTopicUtilities');
 let app;
 
 const significantChangesCache = {};
@@ -408,9 +409,8 @@ const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
 };
 
 const significantChangesCacheKey = (req, title, revision) => {
-    const threshold = getThreshold(req);
     const keyTitle = title || req.params.title;
-    return `${req.params.domain}-${keyTitle}-${revision.revid}-${threshold}`;
+    return `${req.params.domain}-${keyTitle}-${revision.revid}`;
 };
 
 function getCachedAndUncachedItems(revisions, req, title) {
@@ -602,18 +602,11 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
 }
 
 function templateNamesToCallOut() {
-    return ['cite'];
+    return ['cite', 'citation', 'short description'];
 }
 
-function needsToParseForAddedTemplates(text, includeOpeningBraces, includeAll) {
+function needsToParseForAddedTemplates(text, includeOpeningBraces) {
     const names = templateNamesToCallOut();
-
-    if (includeAll) {
-        if ((text.includes('{{') && includeOpeningBraces) || (!includeOpeningBraces)) {
-            return true;
-        }
-        return false;
-    }
 
     for (var n = 0; n < names.length; n++) {
         const name = names[n];
@@ -631,7 +624,7 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces, includeAll) {
 // &diff=965295364&oldid=965071033
 // We are missing some an added reference from line 722. We also aren't
 // catching the <ref> tags in line 579
-function structuredTemplatePromise(text, diff, revision, includeAll) {
+function structuredTemplatePromise(text, diff, revision) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
             var pdoc = yield ParsoidJS.parse(text, { pdoc: true });
@@ -647,8 +640,7 @@ function structuredTemplatePromise(text, diff, revision, includeAll) {
                 for (var i = 0; i < individualTemplates.length; i++) {
                     const template = individualTemplates[i];
 
-                    if (!needsToParseForAddedTemplates(template.name, false,
-                        includeAll)) {
+                    if (!needsToParseForAddedTemplates(template.name, false)) {
                         continue;
                     }
 
@@ -674,15 +666,14 @@ function structuredTemplatePromise(text, diff, revision, includeAll) {
     });
 }
 
-function addStructuredTemplates(diffAndRevisions, includeAll) {
+function addStructuredTemplates(diffAndRevisions) {
     var promises = [];
     diffAndRevisions.forEach(function (diffAndRevision) {
         diffAndRevision.body.diff.forEach(function (diff) {
 
             switch (diff.type) {
                 case 1: // Add complete line type
-                    if (needsToParseForAddedTemplates(diff.text, true,
-                        includeAll)) {
+                    if (needsToParseForAddedTemplates(diff.text, true)) {
                         promises.push(structuredTemplatePromise(diff.text, diff,
                             diffAndRevision.revision));
                     }
@@ -698,10 +689,9 @@ function addStructuredTemplates(diffAndRevisions, includeAll) {
 
                         switch (range.type) {
                             case 0: // Add range type
-                                if (needsToParseForAddedTemplates(rangeText, true,
-                                    includeAll)) {
+                                if (needsToParseForAddedTemplates(rangeText, true)) {
                                     promises.push(structuredTemplatePromise(rangeText, diff,
-                                        diffAndRevision.revision, includeAll));
+                                        diffAndRevision.revision));
                                 }
                                 break;
                             default:
@@ -813,14 +803,17 @@ function getFirstDiffLineWithContent(diffBody) {
     return null;
 }
 
+function sortOutput(output) {
+
+    // sort by date
+    return output.sort(function(a, b) {
+        return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+}
+
 function cleanOutput(output) {
 
     // collapses small changes, converts large changes only to info needed
-
-    // sort by date first
-    output = output.sort(function(a, b) {
-        return new Date(b.timestamp) - new Date(a.timestamp);
-    });
 
     const cleanedOutput = [];
     let numSmallChanges = 0;
@@ -852,6 +845,75 @@ function cleanOutput(output) {
     }
 
     return cleanedOutput;
+}
+
+function editCountsAndGroupsPromise(req, cleanedOutput) {
+
+    // gather unique userids
+    var userids = [];
+    cleanedOutput.forEach( (outputItem) => {
+        if (outputItem.userid !== undefined && outputItem.userid !== null &&
+            outputItem.userid !== 0) {
+            userids.push(outputItem.userid);
+        }
+    });
+    var dedupedIdsSet = new Set(userids);
+    var dedupedIds = Array.from(dedupedIdsSet);
+    // fetch counts and groups
+    return mwapi.queryForUsers(req, dedupedIds)
+        .then( (response) => {
+            // distribute results back into cleanedOutput
+            const users = response.body.query.users;
+            users.forEach( (user) => {
+                cleanedOutput.forEach( (outputItem) => {
+                    if (outputItem.userid === user.userid) {
+                        outputItem.userGroups = user.groups;
+                        outputItem.userEditCount = user.editcount;
+                    }
+                });
+            });
+
+            return cleanedOutput;
+        });
+}
+
+function shaFromSortedOutput(req, sortedOutput) {
+    var shaTitle;
+    var shaRevID;
+    for (var i = 0; i < sortedOutput.length; i++) {
+        const output = sortedOutput[i];
+        if (output.outputType === 'large-change') {
+            shaTitle = req.params.title;
+            shaRevID = output.revid;
+            break;
+        }
+
+        if (output.outputType === 'new-talk-page-topic') {
+            shaTitle = talkPageTitle(req);
+            shaRevID = output.revid;
+            break;
+        }
+    }
+
+    if (shaTitle === undefined || shaTitle === null || shaRevID === undefined ||
+        shaRevID === null) {
+        // grab first item, even if it's a small type
+        for (var s = 0; s < sortedOutput.length; s++) {
+            const output = sortedOutput[s];
+            if (output.outputType === 'small-change') {
+                shaTitle = req.params.title;
+                shaRevID = output.revid;
+                break;
+            }
+        }
+    }
+
+    if (shaTitle === undefined || shaTitle === null || shaRevID === undefined ||
+        shaRevID === null) {
+        return null;
+    }
+
+    return tUtil.createSha256(`${shaTitle}${shaRevID}`);
 }
 
 function getSignificantEvents(req, res) {
@@ -1084,11 +1146,22 @@ function getSignificantEvents(req, res) {
         })
         .then( (response) => {
 
-            const cleanedOutput = cleanOutput(response.finalOutput);
-            const result = Object.assign({ nextRvStartId: response.nextRvStartId,
-                timeline: cleanedOutput } );
-            res.send(result).end();
+            const sortedOutput = sortOutput((response.finalOutput));
+            const cleanedOutput = cleanOutput(sortedOutput);
+            const sha = shaFromSortedOutput(req, sortedOutput);
 
+            return editCountsAndGroupsPromise(req, cleanedOutput)
+                .then( (editCountsAndGroupsResponse) => {
+                    return Object.assign({ nextRvStartId: response.nextRvStartId,
+                        cleanedOutput: editCountsAndGroupsResponse, sha: sha });
+                });
+        })
+        .then( (response) => {
+
+            const result = Object.assign({ nextRvStartId: response.nextRvStartId,
+                sha: response.sha,
+                timeline: response.cleanedOutput } );
+            res.send(result).end();
         });
 }
 
