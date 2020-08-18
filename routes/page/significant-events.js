@@ -13,6 +13,7 @@ const tUtil = require('../../lib/talk/TalkPageTopicUtilities');
 let app;
 
 const significantChangesCache = {};
+const maxAllowedCachedArticleSignificantEvents = 10;
 
 class CharacterChangeWithSections {
     constructor(counts, addedSections, deletedSections) {
@@ -408,12 +409,8 @@ const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
     return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd );
 };
 
-const significantChangesCacheKey = (req, title, revision) => {
-    const keyTitle = title || req.params.title;
-    return `${req.params.domain}-${keyTitle}-${revision.revid}`;
-};
-
 function getCachedAndUncachedItems(revisions, req, title) {
+
     // add cache to output and filter out of processing flow
     const uncachedRevisions = [];
     const cachedOutput = [];
@@ -425,20 +422,205 @@ function getCachedAndUncachedItems(revisions, req, title) {
         });
     }
 
-    revisions.forEach(function (revision) {
-
-        const cacheKey = significantChangesCacheKey(req, title, revision);
-        const cacheItem = significantChangesCache[cacheKey];
-        if (cacheItem) {
-            cachedOutput.push(cacheItem);
-        } else {
-            uncachedRevisions.push(revision);
+    const keyTitle = title || req.params.title;
+    for (var i = 0; i < revisions.length; i++) {
+        const revision = revisions[i];
+        const domainDict = significantChangesCache[req.params.domain];
+        if (domainDict) {
+            const titleDict = domainDict[keyTitle];
+            if (titleDict) {
+                const cacheItem = titleDict[revision.revid];
+                if (cacheItem) {
+                    cachedOutput.push(cacheItem);
+                    continue;
+                }
+            }
         }
-    });
+
+        uncachedRevisions.push(revision);
+    }
 
     return Object.assign({
         uncachedRevisions: uncachedRevisions,
         cachedOutput: cachedOutput
+    });
+}
+
+function outputTypeCountsTowardsCache(outputType) {
+    return outputType === 'large-change' || outputType === 'vandalism-revert';
+}
+
+function calculateCacheForTitleIsMaxedOut(titleDict) {
+    // eslint-disable-next-line no-restricted-properties
+    const titleArray = Object.values(titleDict);
+    const filteredObjects = titleArray.filter(outputObject =>
+        outputTypeCountsTowardsCache(outputObject.outputType));
+    return filteredObjects.length >= maxAllowedCachedArticleSignificantEvents;
+}
+
+function cacheForTitleIsMaxedOut(req, title) {
+    const keyTitle = title || req.params.title;
+    var domainDict = significantChangesCache[req.params.domain];
+    if (domainDict) {
+        var titleDict = domainDict[keyTitle];
+        if (titleDict) {
+            if (titleDict.maxedOut) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function latestAndEarliestCachedRevisionTimestamp(req, title) {
+    var domainDict = significantChangesCache[req.params.domain];
+    const keyTitle = title || req.params.title;
+    if (domainDict) {
+        var titleDict = domainDict[keyTitle];
+        if (titleDict) {
+            // eslint-disable-next-line no-restricted-properties
+            const titleArray = Object.values(titleDict);
+            const sortedTitleObjects = titleArray.sort(function (a, b) {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            var latestTimestamp = null;
+            var earliestTimestamp = null;
+            if (sortedTitleObjects.length > 0) {
+                latestTimestamp = sortedTitleObjects[0].timestamp;
+                earliestTimestamp = sortedTitleObjects[sortedTitleObjects.length - 1].timestamp;
+            }
+
+            return Object.assign( {
+                latestTimestamp: latestTimestamp,
+                earliestTimestamp: earliestTimestamp
+            });
+        }
+    }
+}
+
+function setSignificantChangesCache(req, title, item) {
+    var domainDict = significantChangesCache[req.params.domain];
+    const keyTitle = title || req.params.title;
+    if (domainDict) {
+        var titleDict = domainDict[keyTitle];
+        if (titleDict) {
+            titleDict[item.revid] = item;
+            titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
+        } else {
+            titleDict = {};
+            titleDict[item.revid] = item;
+            titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
+            domainDict[keyTitle] = titleDict;
+        }
+    } else {
+        titleDict = {};
+        titleDict[item.revid] = item;
+        titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
+        domainDict = {};
+        domainDict[keyTitle] = titleDict;
+        significantChangesCache[req.params.domain] = domainDict;
+    }
+}
+
+function cleanupCache(req) {
+
+    // cleanup article cache
+    var domainDict = significantChangesCache[req.params.domain];
+    const articleTitle = req.params.title;
+    if (domainDict) {
+        var titleDict = domainDict[articleTitle];
+        if (titleDict) {
+            // eslint-disable-next-line no-restricted-properties
+            const titleArray = Object.values(titleDict);
+            const sortedTitleArray = titleArray.sort(function(a, b) {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            const significantCachedObjects = sortedTitleArray.filter(outputObject =>
+                outputTypeCountsTowardsCache(outputObject.outputType));
+            const delta = significantCachedObjects.length -
+                maxAllowedCachedArticleSignificantEvents;
+
+            var timestampCutoff = null;
+            for (var i = significantCachedObjects.length - 1;
+                 i > significantCachedObjects.length - delta; i--) {
+                const significantCachedObject = significantCachedObjects[i];
+                timestampCutoff = significantCachedObject.timestamp;
+            }
+
+            // clean out all cached article and cached talk page revisions
+            // after the 100th significant event
+            if (timestampCutoff) {
+                const cutoffDate = new Date(timestampCutoff);
+
+                // clean out from article cache
+                for (var s = sortedTitleArray.length - 1; s >= 0; s--) {
+                    const sortedObjectToConsider = sortedTitleArray[s];
+                    const objectDate = new Date(sortedObjectToConsider.timestamp);
+                    if (objectDate < cutoffDate) {
+                        titleDict.delete(sortedObjectToConsider.revid);
+                    } else {
+                        break;
+                    }
+                }
+
+                // clean out from talk page cache
+                var talkPageTitle = talkPageTitle(req);
+                var talkPageTitleDict = domainDict[talkPageTitle];
+                if (talkPageTitleDict) {
+                    // eslint-disable-next-line no-restricted-properties
+                    const talkPageTitleArray = Object.values(talkPageTitleDict);
+                    const sortedTalkPageTitleArray = talkPageTitleArray.sort(function(a, b) {
+                        return new Date(b.timestamp) - new Date(a.timestamp);
+                    });
+
+                    for (var t = sortedTalkPageTitleArray.length - 1; t >= 0; t--) {
+                        const sortedTalkObjectToConsider = sortedTalkPageTitleArray[t];
+                        const talkObjectDate = new Date(sortedTalkObjectToConsider.timestamp);
+                        if (talkObjectDate < cutoffDate) {
+                            talkPageTitleDict.delete(sortedTalkObjectToConsider.revid);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function getSummaryText(req) {
+    var domainDict = significantChangesCache[req.params.domain];
+    const articleTitle = req.params.title;
+    if (domainDict) {
+        var titleDict = domainDict[articleTitle];
+        if (titleDict) {
+            // eslint-disable-next-line no-restricted-properties
+            const titleArray = Object.values(titleDict);
+            const sortedTitleArray = titleArray.sort(function (a, b) {
+                return new Date(b.timestamp) - new Date(a.timestamp);
+            });
+            const earliestTimestamp = sortedTitleArray[sortedTitleArray.length - 1].timestamp;
+            var userids = [];
+            for (var i = 0; i <= titleArray.length - 1; i++) {
+                const object = titleArray[i];
+                userids.push(object.userid);
+            }
+            var dedupedUserIds = new Set(userids);
+            const numUsers = dedupedUserIds.size;
+
+            return Object.assign({
+                earliestTimestamp: earliestTimestamp,
+                dedupedUserIds: dedupedUserIds,
+                numUsers: numUsers
+            });
+        }
+    }
+
+    return Object.assign( {
+        earliestTimestamp: null,
+        dedupedUserIds: null,
+        numUsers: null
     });
 }
 
@@ -925,27 +1107,59 @@ function getSignificantEvents(req, res) {
             // STEP 2: All at once gather diffs for each uncached revision and list of
             // talk page revisions
             const revisions = response.body.query.pages[0].revisions;
-            // todo: length error checking here, parentid check here
-            const nextRvStartId = revisions[revisions.length - 1].parentid;
 
-            const articleEvalResults = getCachedAndUncachedItems(revisions, req, null);
+            // BEGIN: PAGE CUTOFF LOGIC
+            // page cutoff: if cache is maxed out, filter out any revisions
+            // that occur before the cutoff
+            const cutoff = latestAndEarliestCachedRevisionTimestamp(req);
+            var filteredRevisions;
+            const isMaxedOut = cacheForTitleIsMaxedOut(req);
+            if (isMaxedOut && cutoff.earliestTimestamp) {
+                filteredRevisions = revisions.filter(revision => new Date(revision.timestamp) >
+                    new Date(cutoff.earliestTimestamp));
+            } else {
+                filteredRevisions = revisions;
+            }
+
+            // if cache is maxed out and filteredRevisions contains
+            // revisions from after the latest cached revision,
+            // propagate flag for needing cleanup later
+            var needsCacheCleanup = false;
+            if (isMaxedOut) {
+                for (var i = 0; i < filteredRevisions.length; i++) {
+                    const revision = filteredRevisions[i];
+                    const timestamp = new Date(revision.timestamp);
+                    const latestCacheTimestamp = new Date(cutoff.latestTimestamp);
+                    if (timestamp > latestCacheTimestamp) {
+                        needsCacheCleanup = true;
+                        break;
+                    }
+                }
+            }
+            // END: PAGE CUTOFF LOGIC
+
+            // todo: length error checking here, parentid check here
+            const nextRvStartId = filteredRevisions[filteredRevisions.length - 1].parentid;
+
+            const articleEvalResults = getCachedAndUncachedItems(filteredRevisions, req, null);
 
             // save cached article revisions to finalOutput
             const finalOutput = articleEvalResults.cachedOutput;
 
             const rvStart = (req.query.rvstartid !== undefined && req.query.rvstartid !== null) ?
-                revisions[0].timestamp : null;
+                filteredRevisions[0].timestamp : null;
             // if rvstartid is missing from query, they are fetching the first page
             // if they are fetching the first page, we don't want to block of
             // talk page revision fetching at the start, in case talk page topics came in
             // after the latest article revision
-            const rvEnd = revisions[revisions.length - 1].timestamp;
+            const rvEnd = filteredRevisions[filteredRevisions.length - 1].timestamp;
 
             return BBPromise.props({
                 articleDiffAndRevisions: diffAndRevisionPromises(req,
                     articleEvalResults.uncachedRevisions),
                 talkPageRevisions: talkPageRevisionsPromise(req, rvStart, rvEnd),
                 nextRvStartId: nextRvStartId,
+                needsCacheCleanup: needsCacheCleanup,
                 finalOutput: finalOutput
             });
         })
@@ -956,6 +1170,7 @@ function getSignificantEvents(req, res) {
             const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
             const articleDiffAndRevisions = response.articleDiffAndRevisions;
             const nextRvStartId = response.nextRvStartId;
+            const needsCacheCleanup = response.needsCacheCleanup;
 
             const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions,
                 req, talkPageTitle(req));
@@ -970,6 +1185,7 @@ function getSignificantEvents(req, res) {
                         articleDiffAndRevisions: articleDiffAndRevisions,
                         talkDiffAndRevisions: response,
                         nextRvStartId: nextRvStartId,
+                        needsCacheCleanup: needsCacheCleanup,
                         finalOutput: finalOutput
                     });
                 });
@@ -1071,7 +1287,9 @@ function getSignificantEvents(req, res) {
             });
 
             return Object.assign({ nextRvStartId: response.nextRvStartId,
-                uncachedOutput: uncachedOutput, finalOutput: response.finalOutput } );
+                needsCacheCleanup: response.needsCacheCleanup,
+                uncachedOutput: uncachedOutput,
+                finalOutput: response.finalOutput } );
         })
         .then( (response) => {
 
@@ -1133,14 +1351,14 @@ function getSignificantEvents(req, res) {
                         var cacheKey;
                         if (item.outputType === 'new-talk-page-topic') {
                             const title = talkPageTitle(req);
-                            cacheKey = significantChangesCacheKey(req, title, item);
+                            setSignificantChangesCache(req, title, item);
                         } else {
-                            cacheKey = significantChangesCacheKey(req, null, item);
+                            setSignificantChangesCache(req, null, item);
                         }
-                        significantChangesCache[cacheKey] = item;
                     });
 
                     return Object.assign({ nextRvStartId: response.nextRvStartId,
+                        needsCacheCleanup: response.needsCacheCleanup,
                         finalOutput: response.finalOutput } );
                 });
         })
@@ -1153,14 +1371,23 @@ function getSignificantEvents(req, res) {
             return editCountsAndGroupsPromise(req, cleanedOutput)
                 .then( (editCountsAndGroupsResponse) => {
                     return Object.assign({ nextRvStartId: response.nextRvStartId,
+                        needsCacheCleanup: response.needsCacheCleanup,
                         cleanedOutput: editCountsAndGroupsResponse, sha: sha });
                 });
         })
         .then( (response) => {
 
+            if (response.needsCacheCleanup) {
+                cleanupCache(req);
+            }
+
+            const summary = getSummaryText(req);
+
             const result = Object.assign({ nextRvStartId: response.nextRvStartId,
                 sha: response.sha,
-                timeline: response.cleanedOutput } );
+                timeline: response.cleanedOutput,
+                cache: significantChangesCache,
+                summary: summary });
             res.send(result).end();
         });
 }
