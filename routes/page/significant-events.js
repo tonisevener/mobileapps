@@ -10,10 +10,43 @@ const encoding = require('@root/encoding');
 const ParsoidJS = require('parsoid-jsapi');
 const PRFunPromise = require('prfun');
 const tUtil = require('../../lib/talk/TalkPageTopicUtilities');
+const Snippet = require('../../lib/snippet/Snippet');
+const NodeType = require('../../lib/nodeType');
 let app;
 
 const significantChangesCache = {};
 const maxAllowedCachedArticleSignificantEvents = 10;
+
+const tagReplacements = {
+    A: 'a',
+    B: 'b',
+    I: 'i',
+    SUP: 'sup',
+    SUB: 'sub',
+    DT: 'b',
+    CODE: 'b',
+    BIG: 'b',
+    LI: 'li',
+    OL: 'ol',
+    UL: 'ul',
+    DL: 'ul',
+    DD: 'li'
+};
+
+const tagsToRemoveEntirely = 'script,style';
+const tagsToRemoveButKeepContents = new Set(['P', 'DIV', 'SPAN']);
+const escapeRegex = /[<>]/g;
+const escapeMap = {
+    '<': '&lt;',
+    '>': '&gt;',
+    '&': '&amp;'
+};
+
+const escape = text => {
+    return text.replace(escapeRegex, (match) => {
+        return escapeMap[match] || '';
+    });
+};
 
 class CharacterChangeWithSections {
     constructor(counts, addedSections, deletedSections) {
@@ -191,6 +224,56 @@ const diffAndRevisionPromise = (req, revision) => {
         });
 };
 
+function removeNodeButPreserveContents(node) {
+    while (node.childNodes.length > 0) {
+        const firstChild = node.firstChild;
+        if (firstChild) {
+            node.parentNode.insertBefore(firstChild, node);
+        }
+    }
+    node.parentNode.removeChild(node);
+}
+
+function renameNode(doc, node, newNodeName) {
+
+    // todo: I think leaving this commented out will clean out attributes.
+    // Not sure if this is good or bad.
+    // if (node.tagName.toLowerCase() === newNodeName.toLowerCase()) {
+    //     return;
+    // }
+
+    var newNode = doc.createElement(newNodeName);
+    newNode.innerHTML = node.innerHTML;
+    node.parentNode.replaceChild(newNode, node);
+}
+
+function recursivelyEvaluateNode(doc, node) {
+
+    if (node.nodeType === NodeType.ELEMENT_NODE) {
+        const sub = tagReplacements[node.tagName];
+
+        if (!sub) {
+            if (tagsToRemoveButKeepContents.has(node.tagName)) {
+                removeNodeButPreserveContents(node);
+            } else {
+                if (node.tagName !== 'BODY') {
+                    node.parentNode.removeChild(node);
+                }
+            }
+        } else {
+            renameNode(doc, node, sub);
+        }
+    } else if (node.nodeType === NodeType.TEXT_NODE) {
+        node.textContent = escape(node.textContent);
+    }
+
+    if (node.childElementCount > 0) {
+        Array.from(node.children).forEach(child => {
+            recursivelyEvaluateNode(doc, child);
+        });
+    }
+}
+
 const formattedSnippetFromTextPromise = (req, text) => {
 
     const headers = Object.assign( {
@@ -215,15 +298,14 @@ const formattedSnippetFromTextPromise = (req, text) => {
     return req.issueRequest(request)
         .then( (response) => {
             return mUtil.createDocument(response.body);
-        }).then((response) => {
+        }).then( (response) => {
 
-            // removing script tags here
-            // todo: try to remove first section that is inserted too
-            const scripts = response.body.getElementsByTagName('script');
-            const scriptsList = Array.prototype.slice.call(scripts);
+            // removing tags here
+            const elementsToRemove = response.querySelectorAll(tagsToRemoveEntirely);
+            const elementsToRemoveList = Array.prototype.slice.call(elementsToRemove);
             const references = response.body.getElementsByClassName('mw-references-wrap');
             const referencesList = Array.prototype.slice.call(references);
-            const finalListToStrip = scriptsList.concat(referencesList);
+            const finalListToStrip = elementsToRemoveList.concat(referencesList);
             finalListToStrip.forEach( (script) => {
                 script.parentNode.removeChild(script);
             });
@@ -231,32 +313,31 @@ const formattedSnippetFromTextPromise = (req, text) => {
             // mobile-html endpoint seems to return a wrapper pcs, section and paragraph element.
             // strip these out as well.
 
-            var strippedSnippet = response.body.innerHTML;
             const pcsElement = response.getElementById('pcs');
             if (pcsElement) {
-                const sectionWrapper = pcsElement.firstChild;
-                if (sectionWrapper.tagName === 'SECTION') {
-                    strippedSnippet = sectionWrapper.innerHTML;
+                const section = pcsElement.firstChild;
+                if (section.tagName === 'SECTION') {
+                    removeNodeButPreserveContents(section);
                 }
 
-                const paragraphWrapper = sectionWrapper.firstChild;
-                if (paragraphWrapper && paragraphWrapper.tagName === 'P') {
-
-                    var parent = paragraphWrapper.parentNode;
-                    while ( paragraphWrapper.firstChild ) {
-                        parent.insertBefore(  paragraphWrapper.firstChild, paragraphWrapper );
-                    }
-                    parent.removeChild( paragraphWrapper );
-
-                    strippedSnippet = sectionWrapper.innerHTML;
+                const paragraph = pcsElement.firstChild;
+                if (paragraph && paragraph.tagName === 'P') {
+                    removeNodeButPreserveContents(paragraph);
                 }
-
-                // todo: remove monte tags from sectionWrapper
             } else {
-                // todo: remove monte tags from body
+                // todo: bail with empty snippet.
             }
 
-            return strippedSnippet;
+            removeNodeButPreserveContents(pcsElement);
+
+            // now walk remaining doc elements and strip unsupported elements
+
+            recursivelyEvaluateNode(response, response.body);
+
+            return response;
+        })
+        .then((response) => {
+            return response.body.innerHTML;
         });
 };
 
@@ -384,6 +465,7 @@ const snippetPromise = (req, preformattedSnippet) => {
                     truncatedSnippet = '...'.concat(truncatedSnippet).concat('...');
                 }
             }
+            truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '<span class=\'highlight-start\'>').replace(/ioshighlightend/g, '</span>');
             preformattedSnippet.snippet = truncatedSnippet;
             return preformattedSnippet;
         });
@@ -1386,7 +1468,7 @@ function getSignificantEvents(req, res) {
             const result = Object.assign({ nextRvStartId: response.nextRvStartId,
                 sha: response.sha,
                 timeline: response.cleanedOutput,
-                cache: significantChangesCache,
+                debugCache: significantChangesCache,
                 summary: summary });
             res.send(result).end();
         });
