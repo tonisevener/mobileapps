@@ -15,7 +15,7 @@ const NodeType = require('../../lib/nodeType');
 let app;
 
 const significantChangesCache = {};
-const maxAllowedCachedArticleSignificantEvents = 10;
+const maxAllowedCachedArticleSignificantEvents = 100;
 
 const tagReplacements = {
     A: 'a',
@@ -40,6 +40,15 @@ const escapeMap = {
     '<': '&lt;',
     '>': '&gt;',
     '&': '&amp;'
+};
+const attributesToRemoveMap = {
+    style: true,
+    id: true,
+    class: true,
+    rel: true,
+    about: true,
+    'data-mw': true,
+    typeof: true
 };
 
 const escape = text => {
@@ -215,6 +224,9 @@ function stringByRemovingSubstring(originalString, beginningIndex, endIndex) {
 }
 
 const diffAndRevisionPromise = (req, revision) => {
+    if (revision.parentid === 0) {
+        return null;
+    }
     return mwrestapi.queryForDiff(req, revision.parentid, revision.revid)
         .then( (response) => {
             return Object.assign({
@@ -234,13 +246,20 @@ function removeNodeButPreserveContents(node) {
     node.parentNode.removeChild(node);
 }
 
-function renameNode(doc, node, newNodeName) {
+function renameNodeAndClearOutAttributes(doc, node, newNodeName) {
 
-    // todo: I think leaving this commented out will clean out attributes.
-    // Not sure if this is good or bad.
-    // if (node.tagName.toLowerCase() === newNodeName.toLowerCase()) {
-    //     return;
-    // }
+    // first clear out attributes
+    for (var i = 0; i < node.attributes.length; i++) {
+        var attrib = node.attributes[i];
+        if (attributesToRemoveMap[attrib] === true) {
+            node.removeAttribute(attrib);
+        }
+    }
+
+    // then rename node if necessary
+    if (node.tagName.toLowerCase() === newNodeName.toLowerCase()) {
+        return;
+    }
 
     var newNode = doc.createElement(newNodeName);
     newNode.innerHTML = node.innerHTML;
@@ -261,7 +280,7 @@ function recursivelyEvaluateNode(doc, node) {
                 }
             }
         } else {
-            renameNode(doc, node, sub);
+            renameNodeAndClearOutAttributes(doc, node, sub);
         }
     } else if (node.nodeType === NodeType.TEXT_NODE) {
         node.textContent = escape(node.textContent);
@@ -456,15 +475,25 @@ const snippetPromise = (req, preformattedSnippet) => {
                 // focused on area that changed
                 const firstStart = response.indexOf('ioshighlightstart');
                 const lastStart = response.lastIndexOf('ioshighlightend');
-                if (firstStart >= 0 && lastStart >= 0) {
+
+                // If highlighting starts at the beginning of the line, don't
+                // truncate or prepend ...
+                // Otherwise truncate and prepend ...
+                // all lines truncate at the last highlight end line and suffix with ...
+                // regardless if
+                // it's the last thing in the snippet.
+                truncatedSnippet = truncatedSnippet.slice(0, lastStart + 'ioshighlightend'.length);
+                truncatedSnippet = truncatedSnippet.concat('...');
+                if (firstStart > 0) {
                     truncatedSnippet = truncatedSnippet.slice(firstStart);
-                    truncatedSnippet = truncatedSnippet.slice(0, lastStart);
-                    // UNCOMMENT THIS LINE IF HIGHLIGHTING IS NOT WORTH IT
-                    // truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '')
-                    // .replace(/ioshighlightend/g, '');
-                    truncatedSnippet = '...'.concat(truncatedSnippet).concat('...');
+                    truncatedSnippet = '...'.concat(truncatedSnippet);
                 }
+
+                // UNCOMMENT THIS LINE IF HIGHLIGHTING IS NOT WORTH IT
+                // truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '')
+                // .replace(/ioshighlightend/g, '');
             }
+
             truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '<span class=\'highlight-start\'>').replace(/ioshighlightend/g, '</span>');
             preformattedSnippet.snippet = truncatedSnippet;
             return preformattedSnippet;
@@ -483,9 +512,9 @@ const diffAndRevisionPromises = (req, revisions) => {
     });
 };
 
-const talkPageTitle = (req) => {
+function talkPageTitle(req) {
     return `Talk:${req.params.title}`;
-};
+}
 
 const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
     return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd );
@@ -534,7 +563,8 @@ function outputTypeCountsTowardsCache(outputType) {
 
 function calculateCacheForTitleIsMaxedOut(titleDict) {
     // eslint-disable-next-line no-restricted-properties
-    const titleArray = Object.values(titleDict);
+    var titleArray = Object.values(titleDict);
+    titleArray.pop(); // remove maxedOut element
     const filteredObjects = titleArray.filter(outputObject =>
         outputTypeCountsTowardsCache(outputObject.outputType));
     return filteredObjects.length >= maxAllowedCachedArticleSignificantEvents;
@@ -562,7 +592,8 @@ function latestAndEarliestCachedRevisionTimestamp(req, title) {
         var titleDict = domainDict[keyTitle];
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
-            const titleArray = Object.values(titleDict);
+            var titleArray = Object.values(titleDict);
+            titleArray.pop(); // remove maxedOut element
             const sortedTitleObjects = titleArray.sort(function (a, b) {
                 return new Date(b.timestamp) - new Date(a.timestamp);
             });
@@ -610,11 +641,13 @@ function cleanupCache(req) {
     // cleanup article cache
     var domainDict = significantChangesCache[req.params.domain];
     const articleTitle = req.params.title;
-    if (domainDict) {
+        if (domainDict) {
         var titleDict = domainDict[articleTitle];
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
-            const titleArray = Object.values(titleDict);
+            var titleArray = Object.values(titleDict);
+            titleArray.pop(); // remove maxedOut element
+
             const sortedTitleArray = titleArray.sort(function(a, b) {
                 return new Date(b.timestamp) - new Date(a.timestamp);
             });
@@ -624,9 +657,9 @@ function cleanupCache(req) {
                 maxAllowedCachedArticleSignificantEvents;
 
             var timestampCutoff = null;
-            for (var i = significantCachedObjects.length - 1;
-                 i > significantCachedObjects.length - delta; i--) {
-                const significantCachedObject = significantCachedObjects[i];
+            if (delta > 0) {
+                const significantCachedObject =
+                    significantCachedObjects[significantCachedObjects.length - delta - 1];
                 timestampCutoff = significantCachedObject.timestamp;
             }
 
@@ -640,18 +673,20 @@ function cleanupCache(req) {
                     const sortedObjectToConsider = sortedTitleArray[s];
                     const objectDate = new Date(sortedObjectToConsider.timestamp);
                     if (objectDate < cutoffDate) {
-                        titleDict.delete(sortedObjectToConsider.revid);
+                        delete titleDict[sortedObjectToConsider.revid];
                     } else {
                         break;
                     }
                 }
 
                 // clean out from talk page cache
-                var talkPageTitle = talkPageTitle(req);
+                // todo: why on earth do we get a talkPageTitle is not a function error here?
+                var talkPageTitle = `Talk:${req.params.title}`; // talkPageTitle(req);
                 var talkPageTitleDict = domainDict[talkPageTitle];
                 if (talkPageTitleDict) {
                     // eslint-disable-next-line no-restricted-properties
-                    const talkPageTitleArray = Object.values(talkPageTitleDict);
+                    var talkPageTitleArray = Object.values(talkPageTitleDict);
+                    talkPageTitleArray.pop(); // remove maxedOut element
                     const sortedTalkPageTitleArray = talkPageTitleArray.sort(function(a, b) {
                         return new Date(b.timestamp) - new Date(a.timestamp);
                     });
@@ -660,7 +695,7 @@ function cleanupCache(req) {
                         const sortedTalkObjectToConsider = sortedTalkPageTitleArray[t];
                         const talkObjectDate = new Date(sortedTalkObjectToConsider.timestamp);
                         if (talkObjectDate < cutoffDate) {
-                            talkPageTitleDict.delete(sortedTalkObjectToConsider.revid);
+                            delete talkPageTitleDict[sortedTalkObjectToConsider.revid];
                         } else {
                             break;
                         }
@@ -678,7 +713,8 @@ function getSummaryText(req) {
         var titleDict = domainDict[articleTitle];
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
-            const titleArray = Object.values(titleDict);
+            var titleArray = Object.values(titleDict);
+            titleArray.pop(); // remove maxedOut element
             const sortedTitleArray = titleArray.sort(function (a, b) {
                 return new Date(b.timestamp) - new Date(a.timestamp);
             });
@@ -693,7 +729,7 @@ function getSummaryText(req) {
 
             return Object.assign({
                 earliestTimestamp: earliestTimestamp,
-                dedupedUserIds: dedupedUserIds,
+                numChanges: titleArray.length,
                 numUsers: numUsers
             });
         }
@@ -1141,7 +1177,16 @@ function editCountsAndGroupsPromise(req, cleanedOutput) {
         });
 }
 
+function isRequestingFirstPage(req) {
+    return req.query.rvstartid === undefined || req.query.rvstartid === null;
+}
+
 function shaFromSortedOutput(req, sortedOutput) {
+
+    if (!isRequestingFirstPage(req)) {
+        return null;
+    }
+
     var shaTitle;
     var shaRevID;
     for (var i = 0; i < sortedOutput.length; i++) {
@@ -1220,26 +1265,42 @@ function getSignificantEvents(req, res) {
             }
             // END: PAGE CUTOFF LOGIC
 
-            // todo: length error checking here, parentid check here
-            const nextRvStartId = filteredRevisions[filteredRevisions.length - 1].parentid;
+            var nextRvStartId;
+            var talkPageRvStartId;
+            var talkPageRvEndId;
+            if (filteredRevisions && filteredRevisions.length > 0) {
+                const earliestRevision = filteredRevisions[filteredRevisions.length - 1];
+                const latestRevision = filteredRevisions[0];
+                if (earliestRevision.parentid) {
+                    nextRvStartId = earliestRevision.parentid;
+                    // if rvstartid is missing from query, they are fetching the first page
+                    // if they are fetching the first page, we don't want to block of
+                    // talk page revision fetching at the start, in case talk page topics came in
+                    // after the latest article revision
+                    talkPageRvStartId = isRequestingFirstPage(req) ? null :
+                        latestRevision.timestamp;
+                    talkPageRvEndId = earliestRevision.timestamp;
+                }
+
+            } else {
+                nextRvStartId = null;
+                talkPageRvStartId = null;
+                talkPageRvEndId = null;
+            }
 
             const articleEvalResults = getCachedAndUncachedItems(filteredRevisions, req, null);
 
             // save cached article revisions to finalOutput
             const finalOutput = articleEvalResults.cachedOutput;
 
-            const rvStart = (req.query.rvstartid !== undefined && req.query.rvstartid !== null) ?
-                filteredRevisions[0].timestamp : null;
-            // if rvstartid is missing from query, they are fetching the first page
-            // if they are fetching the first page, we don't want to block of
-            // talk page revision fetching at the start, in case talk page topics came in
-            // after the latest article revision
-            const rvEnd = filteredRevisions[filteredRevisions.length - 1].timestamp;
+            const talkPageRevisionPromise = (talkPageRvEndId !== null) ?
+                talkPageRevisionsPromise(req, talkPageRvStartId, talkPageRvEndId)
+                : null;
 
             return BBPromise.props({
                 articleDiffAndRevisions: diffAndRevisionPromises(req,
                     articleEvalResults.uncachedRevisions),
-                talkPageRevisions: talkPageRevisionsPromise(req, rvStart, rvEnd),
+                talkPageRevisions: talkPageRevisionPromise,
                 nextRvStartId: nextRvStartId,
                 needsCacheCleanup: needsCacheCleanup,
                 finalOutput: finalOutput
@@ -1249,35 +1310,48 @@ function getSignificantEvents(req, res) {
 
             // STEP 3: All at once gather diffs for uncached talk page revisions
 
-            const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
-            const articleDiffAndRevisions = response.articleDiffAndRevisions;
+            const articleDiffAndRevisions = response.articleDiffAndRevisions
+                .filter(x => x !== null);
             const nextRvStartId = response.nextRvStartId;
             const needsCacheCleanup = response.needsCacheCleanup;
 
-            const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions,
-                req, talkPageTitle(req));
+            if (response.talkPageRevisions) {
+                const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
+                const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions,
+                    req, talkPageTitle(req));
 
-            // save cached talk page revisions to finalOutput
-            const finalOutput = response.finalOutput.concat(talkPageEvalResults.cachedOutput);
+                // save cached talk page revisions to finalOutput
+                const finalOutput = response.finalOutput.concat(talkPageEvalResults.cachedOutput);
 
-            // for each uncached talk page revision, gather diffs
-            return diffAndRevisionPromises(req, talkPageEvalResults.uncachedRevisions)
-                .then( (response) => {
-                    return Object.assign({
-                        articleDiffAndRevisions: articleDiffAndRevisions,
-                        talkDiffAndRevisions: response,
-                        nextRvStartId: nextRvStartId,
-                        needsCacheCleanup: needsCacheCleanup,
-                        finalOutput: finalOutput
+                // for each uncached talk page revision, gather diffs
+                return diffAndRevisionPromises(req, talkPageEvalResults.uncachedRevisions)
+                    .then( (response) => {
+                        return Object.assign({
+                            articleDiffAndRevisions: articleDiffAndRevisions,
+                            talkDiffAndRevisions: response.filter(x => x !== null),
+                            nextRvStartId: nextRvStartId,
+                            needsCacheCleanup: needsCacheCleanup,
+                            finalOutput: finalOutput
+                        });
                     });
+            } else {
+                return Object.assign({
+                    articleDiffAndRevisions: articleDiffAndRevisions,
+                    talkDiffAndRevisions: null,
+                    nextRvStartId: nextRvStartId,
+                    needsCacheCleanup: needsCacheCleanup,
+                    finalOutput: response.finalOutput
                 });
+            }
         })
         .then( (response) => {
 
             // Determine character size of change for every diff line and aggregate
             // for every revision
             updateDiffAndRevisionsWithCharacterCount(response.articleDiffAndRevisions);
-            updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
+            if (response.talkDiffAndRevisions) {
+                updateDiffAndRevisionsWithCharacterCount(response.talkDiffAndRevisions);
+            }
 
             // Flag added template types
             return addStructuredTemplates(response.articleDiffAndRevisions, false)
@@ -1354,19 +1428,21 @@ function getSignificantEvents(req, res) {
             });
 
             // get new talk page revisions, add to uncachedOutput. it will be sorted later.
-            const newTopicDiffAndRevisions = getNewTopicDiffAndRevisions(
-                response.talkDiffAndRevisions);
-            newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
-                const revision = diffAndRevision.revision;
-                const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
-                const section = getSectionForDiffLine(diffAndRevision.body,
-                    firstDiffLine);
-                const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(revision.revid,
-                    revision.timestamp, revision.user, revision.userid, firstDiffLine.text,
-                    firstDiffLine.type, firstDiffLine.highlightRanges,
-                    diffAndRevision.characterChangeWithSections.counts, section);
-                uncachedOutput.push(newTalkPageTopicOutputObject);
-            });
+            if (response.talkDiffAndRevisions) {
+                const newTopicDiffAndRevisions = getNewTopicDiffAndRevisions(
+                    response.talkDiffAndRevisions);
+                newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
+                    const revision = diffAndRevision.revision;
+                    const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
+                    const section = getSectionForDiffLine(diffAndRevision.body,
+                        firstDiffLine);
+                    const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
+                        revision.revid,revision.timestamp, revision.user, revision.userid,
+                        firstDiffLine.text,firstDiffLine.type, firstDiffLine.highlightRanges,
+                        diffAndRevision.characterChangeWithSections.counts, section);
+                    uncachedOutput.push(newTalkPageTopicOutputObject);
+                });
+            }
 
             return Object.assign({ nextRvStartId: response.nextRvStartId,
                 needsCacheCleanup: response.needsCacheCleanup,
@@ -1465,10 +1541,10 @@ function getSignificantEvents(req, res) {
 
             const summary = getSummaryText(req);
 
+            // todo: sometimes nextRvStartId doesn't show at all in response.
             const result = Object.assign({ nextRvStartId: response.nextRvStartId,
                 sha: response.sha,
                 timeline: response.cleanedOutput,
-                debugCache: significantChangesCache,
                 summary: summary });
             res.send(result).end();
         });
