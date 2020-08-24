@@ -224,14 +224,23 @@ function stringByRemovingSubstring(originalString, beginningIndex, endIndex) {
 }
 
 const diffAndRevisionPromise = (req, revision) => {
-    if (revision.parentid === 0) {
-        return null;
+    if (revision.parentid === null || revision.parentid === undefined || revision.parentid === 0) {
+        return Object.assign({
+            revision: revision,
+            body: null
+        });
     }
     return mwrestapi.queryForDiff(req, revision.parentid, revision.revid)
         .then( (response) => {
             return Object.assign({
                 revision: revision,
                 body: response.body
+            });
+        })
+        .catch(e => {
+            return Object.assign({
+                revision: revision,
+                body: null
             });
         });
 };
@@ -293,6 +302,13 @@ function recursivelyEvaluateNode(doc, node) {
     }
 }
 
+class UnexpectedSnippetFormatError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'UnexpectedSnippetFormatError';
+    }
+}
+
 const formattedSnippetFromTextPromise = (req, text) => {
 
     const headers = Object.assign( {
@@ -344,7 +360,7 @@ const formattedSnippetFromTextPromise = (req, text) => {
                     removeNodeButPreserveContents(paragraph);
                 }
             } else {
-                // todo: bail with empty snippet.
+                throw new UnexpectedSnippetFormatError();
             }
 
             removeNodeButPreserveContents(pcsElement);
@@ -357,12 +373,19 @@ const formattedSnippetFromTextPromise = (req, text) => {
         })
         .then((response) => {
             return response.body.innerHTML;
+        })
+        .catch( (e) => {
+            return null;
         });
 };
 
 const snippetPromise = (req, preformattedSnippet) => {
 
-    if (preformattedSnippet.snippetType === 2) {
+    if (preformattedSnippet.snippet === null ||
+        preformattedSnippet.snippet === undefined ||
+        preformattedSnippet.snippetType === null ||
+        preformattedSnippet.snippetType === undefined ||
+        preformattedSnippet.snippetType === 2) {
         // deleted complete line type.
         // we shouldn't get here but gracefully return null for snippet without trying to
         // format
@@ -390,6 +413,11 @@ const snippetPromise = (req, preformattedSnippet) => {
                 break;
             case 5:
             case 3: // Added and deleted words in line
+
+                if (preformattedSnippet.snippetHighlightRanges === null ||
+                preformattedSnippet.snippetHighlightRanges === undefined) {
+                    break;
+                }
 
                 // first strip deleted text
                 for (var d = preformattedSnippet.snippetHighlightRanges.length - 1; d >= 0; d-- ) {
@@ -425,13 +453,17 @@ const snippetPromise = (req, preformattedSnippet) => {
                 // filter out deleted ranges
                 // eslint-disable-next-line no-case-declarations
                 const addedHighlightRanges = preformattedSnippet.snippetHighlightRanges
-                    .filter(range => range.type === 0);
+                    .filter(range => range.type !== null && range.type !== undefined &&
+                        range.type === 0);
 
                 // then add added text delimiters
                 var addOffset = 0;
                 addedHighlightRanges.forEach(function (range) {
                     switch (range.type) {
                         case 0: // Added
+                            if (range.start === null || range.start === undefined) {
+                                break;
+                            }
                             snippetBinary = insertSubstringInString(snippetBinary,
                                 addHighlightStartBin, range.start + addOffset);
                             addOffset += addHighlightStartBin.length;
@@ -468,8 +500,16 @@ const snippetPromise = (req, preformattedSnippet) => {
             // but if other issues occur, we should remove delimiters. With that we would lose
             // all possibility of stretch goal highlighting
             // and truncation
+
+            if (!response) {
+                preformattedSnippet.snippet = null;
+                return preformattedSnippet;
+            }
+
             var truncatedSnippet = response;
-            if (preformattedSnippet.snippetType === 5 || preformattedSnippet.snippetType === 3) {
+            if (preformattedSnippet.snippetType !== undefined &&
+                preformattedSnippet.snippetType !== null &&
+                preformattedSnippet.snippetType === 5 || preformattedSnippet.snippetType === 3) {
                 // try to trim the areas before the first ioshighlightstart and after the last
                 // ioshighlight start so snippet is
                 // focused on area that changed
@@ -517,7 +557,10 @@ function talkPageTitle(req) {
 }
 
 const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
-    return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd );
+    return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd )
+        .catch(e => {
+            return null;
+        });
 };
 
 function getCachedAndUncachedItems(revisions, req, title) {
@@ -564,10 +607,14 @@ function outputTypeCountsTowardsCache(outputType) {
 function calculateCacheForTitleIsMaxedOut(titleDict) {
     // eslint-disable-next-line no-restricted-properties
     var titleArray = Object.values(titleDict);
-    titleArray.pop(); // remove maxedOut element
-    const filteredObjects = titleArray.filter(outputObject =>
-        outputTypeCountsTowardsCache(outputObject.outputType));
-    return filteredObjects.length >= maxAllowedCachedArticleSignificantEvents;
+    if (titleArray.length > 0) {
+        titleArray.pop(); // remove maxedOut element
+        const filteredObjects = titleArray.filter(outputObject =>
+            outputTypeCountsTowardsCache(outputObject.outputType));
+        return filteredObjects.length >= maxAllowedCachedArticleSignificantEvents;
+    }
+
+    return false;
 }
 
 function cacheForTitleIsMaxedOut(req, title) {
@@ -593,23 +640,27 @@ function latestAndEarliestCachedRevisionTimestamp(req, title) {
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
             var titleArray = Object.values(titleDict);
-            titleArray.pop(); // remove maxedOut element
-            const sortedTitleObjects = titleArray.sort(function (a, b) {
-                return new Date(b.timestamp) - new Date(a.timestamp);
-            });
-            var latestTimestamp = null;
-            var earliestTimestamp = null;
-            if (sortedTitleObjects.length > 0) {
-                latestTimestamp = sortedTitleObjects[0].timestamp;
-                earliestTimestamp = sortedTitleObjects[sortedTitleObjects.length - 1].timestamp;
-            }
+            if (titleArray.length > 0) {
+                titleArray.pop(); // remove maxedOut element
+                const sortedTitleObjects = titleArray.sort(function (a, b) {
+                    return new Date(b.timestamp) - new Date(a.timestamp);
+                });
+                var latestTimestamp = null;
+                var earliestTimestamp = null;
+                if (sortedTitleObjects.length > 0) {
+                    latestTimestamp = sortedTitleObjects[0].timestamp;
+                    earliestTimestamp = sortedTitleObjects[sortedTitleObjects.length - 1].timestamp;
+                }
 
-            return Object.assign( {
-                latestTimestamp: latestTimestamp,
-                earliestTimestamp: earliestTimestamp
-            });
+                return Object.assign( {
+                    latestTimestamp: latestTimestamp,
+                    earliestTimestamp: earliestTimestamp
+                });
+            }
         }
     }
+
+    return null;
 }
 
 function setSignificantChangesCache(req, title, item) {
@@ -646,62 +697,82 @@ function cleanupCache(req) {
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
             var titleArray = Object.values(titleDict);
-            titleArray.pop(); // remove maxedOut element
+            if (titleArray.length > 0) {
+                titleArray.pop(); // remove maxedOut element
 
-            const sortedTitleArray = titleArray.sort(function(a, b) {
-                return new Date(b.timestamp) - new Date(a.timestamp);
-            });
-            const significantCachedObjects = sortedTitleArray.filter(outputObject =>
-                outputTypeCountsTowardsCache(outputObject.outputType));
-            const delta = significantCachedObjects.length -
-                maxAllowedCachedArticleSignificantEvents;
-
-            var timestampCutoff = null;
-            if (delta > 0) {
-                const significantCachedObject =
-                    significantCachedObjects[significantCachedObjects.length - delta - 1];
-                timestampCutoff = significantCachedObject.timestamp;
-            }
-
-            // clean out all cached article and cached talk page revisions
-            // after the 100th significant event
-            if (timestampCutoff) {
-                const cutoffDate = new Date(timestampCutoff);
-
-                // clean out from article cache
-                for (var s = sortedTitleArray.length - 1; s >= 0; s--) {
-                    const sortedObjectToConsider = sortedTitleArray[s];
-                    const objectDate = new Date(sortedObjectToConsider.timestamp);
-                    if (objectDate < cutoffDate) {
-                        delete titleDict[sortedObjectToConsider.revid];
-                    } else {
-                        break;
+                const sortedTitleArray = titleArray.sort(function(a, b) {
+                    if (a.timestamp && b.timestamp) {
+                        return new Date(b.timestamp) - new Date(a.timestamp);
                     }
+                    return 0;
+                });
+                const significantCachedObjects = sortedTitleArray.filter(outputObject => {
+                    if (outputObject.outputType) {
+                        return outputTypeCountsTowardsCache(outputObject.outputType);
+                    }
+
+                     return false;
+                });
+
+                const delta = significantCachedObjects.length -
+                    maxAllowedCachedArticleSignificantEvents;
+
+                var timestampCutoff = null;
+                if (delta > 0 && delta < significantCachedObjects.length &&
+                    significantCachedObjects.length > 0) {
+                    const significantCachedObject =
+                        significantCachedObjects[significantCachedObjects.length - delta - 1];
+                    timestampCutoff = significantCachedObject.timestamp;
                 }
 
-                // clean out from talk page cache
-                // todo: why on earth do we get a talkPageTitle is not a function error here?
-                var talkPageTitle = `Talk:${req.params.title}`; // talkPageTitle(req);
-                var talkPageTitleDict = domainDict[talkPageTitle];
-                if (talkPageTitleDict) {
-                    // eslint-disable-next-line no-restricted-properties
-                    var talkPageTitleArray = Object.values(talkPageTitleDict);
-                    talkPageTitleArray.pop(); // remove maxedOut element
-                    const sortedTalkPageTitleArray = talkPageTitleArray.sort(function(a, b) {
-                        return new Date(b.timestamp) - new Date(a.timestamp);
-                    });
+                // clean out all cached article and cached talk page revisions
+                // after the 100th significant event
+                if (timestampCutoff) {
+                    const cutoffDate = new Date(timestampCutoff);
 
-                    for (var t = sortedTalkPageTitleArray.length - 1; t >= 0; t--) {
-                        const sortedTalkObjectToConsider = sortedTalkPageTitleArray[t];
-                        const talkObjectDate = new Date(sortedTalkObjectToConsider.timestamp);
-                        if (talkObjectDate < cutoffDate) {
-                            delete talkPageTitleDict[sortedTalkObjectToConsider.revid];
-                        } else {
-                            break;
+                    // clean out from article cache
+                    for (var s = sortedTitleArray.length - 1; s >= 0; s--) {
+                        const sortedObjectToConsider = sortedTitleArray[s];
+                        if (sortedObjectToConsider.timestamp !== null &&
+                            sortedObjectToConsider.timestamp !== undefined) {
+                            const objectDate = new Date(sortedObjectToConsider.timestamp);
+                            if (objectDate < cutoffDate) {
+                                delete titleDict[sortedObjectToConsider.revid];
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    // clean out from talk page cache
+                    // todo: why on earth do we get a talkPageTitle is not a function error here?
+                    var talkPageTitle = `Talk:${req.params.title}`; // talkPageTitle(req);
+                    var talkPageTitleDict = domainDict[talkPageTitle];
+                    if (talkPageTitleDict) {
+                        // eslint-disable-next-line no-restricted-properties
+                        var talkPageTitleArray = Object.values(talkPageTitleDict);
+                        if (talkPageTitleArray.length > 0) {
+                            talkPageTitleArray.pop(); // remove maxedOut element
+                            const sortedTalkPageTitleArray =
+                                talkPageTitleArray.sort(function(a, b) {
+                                return new Date(b.timestamp) - new Date(a.timestamp);
+                            });
+
+                            for (var t = sortedTalkPageTitleArray.length - 1; t >= 0; t--) {
+                                const sortedTalkObjectToConsider = sortedTalkPageTitleArray[t];
+                                const talkObjectDate = new
+                                Date(sortedTalkObjectToConsider.timestamp);
+                                if (talkObjectDate < cutoffDate) {
+                                    delete talkPageTitleDict[sortedTalkObjectToConsider.revid];
+                                } else {
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
+
         }
     }
 }
@@ -714,24 +785,29 @@ function getSummaryText(req) {
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
             var titleArray = Object.values(titleDict);
-            titleArray.pop(); // remove maxedOut element
-            const sortedTitleArray = titleArray.sort(function (a, b) {
-                return new Date(b.timestamp) - new Date(a.timestamp);
-            });
-            const earliestTimestamp = sortedTitleArray[sortedTitleArray.length - 1].timestamp;
-            var userids = [];
-            for (var i = 0; i <= titleArray.length - 1; i++) {
-                const object = titleArray[i];
-                userids.push(object.userid);
-            }
-            var dedupedUserIds = new Set(userids);
-            const numUsers = dedupedUserIds.size;
+            if (titleArray.length > 0) {
+                titleArray.pop(); // remove maxedOut element
+                const sortedTitleArray = titleArray.sort(function (a, b) {
+                    return new Date(b.timestamp) - new Date(a.timestamp);
+                });
+                const earliestItem = sortedTitleArray[sortedTitleArray.length - 1];
+                if (earliestItem.timestamp !== undefined && earliestItem.timestamp !== null) {
+                    const earliestTimestamp = earliestItem.timestamp;
+                    var userids = [];
+                    for (var i = 0; i <= titleArray.length - 1; i++) {
+                        const object = titleArray[i];
+                        userids.push(object.userid);
+                    }
+                    var dedupedUserIds = new Set(userids);
+                    const numUsers = dedupedUserIds.size;
 
-            return Object.assign({
-                earliestTimestamp: earliestTimestamp,
-                numChanges: titleArray.length,
-                numUsers: numUsers
-            });
+                    return Object.assign({
+                        earliestTimestamp: earliestTimestamp,
+                        numChanges: titleArray.length,
+                        numUsers: numUsers
+                    });
+                }
+            }
         }
     }
 
@@ -744,8 +820,23 @@ function getSummaryText(req) {
 
 function getSectionForDiffLine(diffBody, diffLine) {
 
+    if (!diffBody || !diffLine) {
+        return null;
+    }
+
     var fromSection = null;
     var toSection = null;
+
+    // safety
+    if (!diffBody.from ||
+    !diffBody.from.sections ||
+    !diffBody.to ||
+    !diffBody.to.sections ||
+    !diffLine.offset ||
+    !diffLine.offset.from ||
+    !diffLine.offset.to) {
+        return null;
+    }
 
     // capture intro
     if ((!diffBody.from.sections ||
@@ -782,15 +873,20 @@ function getSectionForDiffLine(diffBody, diffLine) {
             const section = diffBody.from.sections[i];
 
             if (diffLine.offset.from < section.offset && prevSection) {
-                fromSection = prevSection.heading;
-                break;
+                if (prevSection.heading) {
+                    fromSection = prevSection.heading;
+                    break;
+                }
             }
 
             prevSection = section;
         }
 
         if (!fromSection && diffLine.offset.from > 0) {
-            fromSection = prevSection.heading;
+            if (prevSection.heading) {
+                fromSection = prevSection.heading;
+            }
+
         }
     }
 
@@ -800,15 +896,19 @@ function getSectionForDiffLine(diffBody, diffLine) {
 
             const section = diffBody.to.sections[i];
             if (diffLine.offset.to < section.offset && prevSection) {
-                toSection = prevSection.heading;
-                break;
+                if (prevSection.heading) {
+                    toSection = prevSection.heading;
+                    break;
+                }
             }
 
             prevSection = section;
         }
 
         if (!toSection && diffLine.offset.to > 0) {
-            toSection = prevSection.heading;
+            if (prevSection.heading) {
+                toSection = prevSection.heading;
+            }
         }
     }
 
@@ -821,10 +921,19 @@ function getSectionForDiffLine(diffBody, diffLine) {
 
 function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
 
+    if (!diffAndRevisions) {
+        return;
+    }
+
     // Loop through diffs, filter out type 0 (context type) and assign byte change properties
     // to the remaining
 
-    diffAndRevisions.forEach(function (diffAndRevision) {
+    for (var i = 0; i < diffAndRevisions.length; i++) {
+        const diffAndRevision = diffAndRevisions[i];
+
+        if (!diffAndRevision.body || !diffAndRevision.body.diff) {
+            continue;
+        }
 
         var filteredDiffs = [];
 
@@ -832,12 +941,22 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
         var aggregateDeletedCount = 0;
         var aggregateAddedSections = new Set();
         var aggregateDeletedSections = new Set();
-        diffAndRevision.body.diff.forEach(function (diff) {
+
+        for (var d = 0; d < diffAndRevision.body.diff.length; d++) {
+            const diff = diffAndRevision.body.diff[d];
+
+            if (diff.type === undefined ||
+            diff.type === null ||
+            diff.text === undefined ||
+            diff.text === null) {
+                continue;
+            }
+
             var lineAddedCount = 0;
             var lineDeletedCount = 0;
             switch (diff.type) {
                 case 0: // Context line type
-                    return;
+                    continue;
                 case 1: // Add complete line type
                     lineAddedCount = diff.text.length;
                     break;
@@ -848,7 +967,21 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
                 // ranges in line)
                 // eslint-disable-next-line no-fallthrough
                 case 3: // Change line type (add and deleted ranges in line)
-                    diff.highlightRanges.forEach(function (range) {
+
+                    if (diff.highlightRanges === undefined ||
+                        diff.highlightRanges === null) {
+                        break;
+                    }
+
+                    for (var h = 0; h < diff.highlightRanges.length; h++) {
+                        const range = diff.highlightRanges[h];
+
+                        if (range.start === null ||
+                            range.start === undefined ||
+                        range.length === null ||
+                        range.length === undefined) {
+                            continue;
+                        }
 
                         const binaryText = encoding.strToBin(diff.text);
                         const binaryRangeText = binaryText.substring(range.start,
@@ -866,7 +999,7 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
                             default:
                                 break;
                         }
-                    });
+                    }
                     break;
                 default:
                     break;
@@ -891,14 +1024,14 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
 
             diff.characterChange = new CharacterChange(lineAddedCount, lineDeletedCount);
             filteredDiffs.push(diff);
-        });
+        }
 
         const aggregateCounts = new CharacterChange(aggregateAddedCount, aggregateDeletedCount);
         diffAndRevision.characterChangeWithSections = new CharacterChangeWithSections(
             aggregateCounts, Array.from(aggregateAddedSections),
             Array.from(aggregateDeletedSections));
         diffAndRevision.body.diff = filteredDiffs;
-    });
+    }
 }
 
 function templateNamesToCallOut() {
@@ -906,6 +1039,14 @@ function templateNamesToCallOut() {
 }
 
 function needsToParseForAddedTemplates(text, includeOpeningBraces) {
+
+    if (text === undefined ||
+    text === null ||
+    includeOpeningBraces === undefined ||
+    includeOpeningBraces === null) {
+        return false;
+    }
+
     const names = templateNamesToCallOut();
 
     for (var n = 0; n < names.length; n++) {
@@ -924,6 +1065,15 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 // &diff=965295364&oldid=965071033
 // We are missing some an added reference from line 722. We also aren't
 // catching the <ref> tags in line 579
+// ANOTHER BUG:
+// Sometimes new citations have spaces within deemed the same, so only part of it
+// is sent in as text whereas we need all of cite.
+// See here
+// https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=971349395&oldid=971332725
+// Also this one
+// https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=971260075&oldid=971259267
+// Definitely some mangled 'added-text' snippets going on here.
+// https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=970665187&oldid=970577931
 function structuredTemplatePromise(text, diff, revision) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
@@ -937,6 +1087,9 @@ function structuredTemplatePromise(text, diff, revision) {
 
                 const innerPdoc = yield ParsoidJS.parse(splitTemplateText, { pdoc: true });
                 const individualTemplates = innerPdoc.filterTemplates();
+                if (individualTemplates === undefined || individualTemplates === null) {
+                    throw new Error('Unexpected result from filterTemplates');
+                }
                 for (var i = 0; i < individualTemplates.length; i++) {
                     const template = individualTemplates[i];
 
@@ -944,12 +1097,21 @@ function structuredTemplatePromise(text, diff, revision) {
                         continue;
                     }
 
+                    if (template.name === undefined ||
+                    template.name === null ||
+                    template.params === undefined ||
+                    template.params === null) {
+                        continue;
+                    }
+
                     var dict = {};
                     dict.name = template.name;
                     for (var p = 0; p < template.params.length; p++) {
                         const param = template.params[p].name;
-                        const value = yield template.get(param).value.toWikitext();
-                        dict[param] = value;
+                        if (param !== undefined && param !== null) {
+                            const value = yield template.get(param).value.toWikitext();
+                            dict[param] = value;
+                        }
                     }
                     templateObjects.push(dict);
                 }
@@ -967,9 +1129,35 @@ function structuredTemplatePromise(text, diff, revision) {
 }
 
 function addStructuredTemplates(diffAndRevisions) {
+
     var promises = [];
-    diffAndRevisions.forEach(function (diffAndRevision) {
-        diffAndRevision.body.diff.forEach(function (diff) {
+
+    if (!diffAndRevisions) {
+        return Promise.all(promises)
+            .then( (response) => {
+                return diffAndRevisions;
+            });
+    }
+
+    for (var i = 0; i < diffAndRevisions.length; i++) {
+        const diffAndRevision = diffAndRevisions[i];
+
+        if (diffAndRevision.body === null ||
+        diffAndRevision.body === undefined ||
+        diffAndRevision.body.diff === null ||
+        diffAndRevision.body.diff === undefined ||
+            diffAndRevision.revision === null ||
+            diffAndRevision.revision === undefined) {
+            continue;
+        }
+
+        for (var d = 0; d < diffAndRevision.body.diff.length; d++) {
+            const diff = diffAndRevision.body.diff[d];
+
+            if (diff.text === undefined ||
+            diff.text === null) {
+                continue;
+            }
 
             switch (diff.type) {
                 case 1: // Add complete line type
@@ -980,7 +1168,16 @@ function addStructuredTemplates(diffAndRevisions) {
                     break;
                 case 5:
                 case 3:
-                    diff.highlightRanges.forEach(function (range) {
+
+                    for (var h = 0; h < diff.highlightRanges.length; h++) {
+                        const range = diff.highlightRanges[h];
+
+                        if (range.start === undefined ||
+                        range.start === null ||
+                        range.length === undefined ||
+                        range.length === null) {
+                            continue;
+                        }
 
                         const binaryText = encoding.strToBin(diff.text);
                         const binaryRangeText = binaryText.substring(range.start,
@@ -997,13 +1194,13 @@ function addStructuredTemplates(diffAndRevisions) {
                             default:
                                 break;
                         }
-                    });
+                    }
                     break;
                 default:
                     break;
             }
-        });
-    });
+        }
+    }
 
     return Promise.all(promises)
         .then( (response) => {
@@ -1012,10 +1209,16 @@ function addStructuredTemplates(diffAndRevisions) {
 
             response.forEach( (item) => {
                diffAndRevisions.forEach( (diffAndRevision) => {
-                  if (item.revision.revid === diffAndRevision.revision.revid) {
-                      diffAndRevision.templates = item.templates;
-                      diffAndRevision.templateDiffLine = item.diff;
-                  }
+
+                   if (item.revision !== null &&
+                   item.revision !== undefined &&
+                   diffAndRevision.revision !== null &&
+                   diffAndRevision.revision !== undefined) {
+                       if (item.revision.revid === diffAndRevision.revision.revid) {
+                           diffAndRevision.templates = item.templates;
+                           diffAndRevision.templateDiffLine = item.diff;
+                       }
+                   }
                });
             });
 
@@ -1025,68 +1228,144 @@ function addStructuredTemplates(diffAndRevisions) {
 
 function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
 
+    if (talkDiffAndRevisions === null ||
+        talkDiffAndRevisions === undefined) {
+        return null;
+    }
+
      const newSectionTalkPageDiffAndRevisions = [];
     // const talkPage = talkPageBody.query.pages;
     // const talkPageObject = talkPage[Object.keys(talkPage)[0]];
     // const talkPageRevisions = talkPageObject.revisions;
-    talkDiffAndRevisions.forEach(function (diffAndRevision, index) {
-         if (diffAndRevision.revision.comment.toLowerCase().includes('new section')
-             && !diffAndRevision.revision.comment.toLowerCase()
-                 .includes('semi-protected edit request') // don't show semi-protected edit requests
-             && diffAndRevision.revision.userid !== 4936590) { // don't show signbot topics
-             // see if this section was reverted in previous iterations
-             var wasReverted = false;
-             if (index - 1 > 0) {
-                 var nextDiffAndRevision = talkDiffAndRevisions[index - 1];
-                 if (nextDiffAndRevision.revision.userid === 4936590) { // signbot,
-                     // look for next revision
-                     if (index - 2 > 0) {
-                         nextDiffAndRevision = talkDiffAndRevisions[index - 2];
-                     }
-                 }
-                 if (nextDiffAndRevision.revision.tags.includes('mw-undo') ||
-                     nextDiffAndRevision.revision.tags.includes('mw-rollback')) {
-                     wasReverted = true;
-                 }
-             }
-             if (wasReverted === false) {
-                 newSectionTalkPageDiffAndRevisions.push(diffAndRevision);
-             }
-         }
-     });
+    for (var index = 0; index < talkDiffAndRevisions.length; index++) {
+        const diffAndRevision = talkDiffAndRevisions[index];
+
+        if (diffAndRevision.revision === null ||
+        diffAndRevision.revision === undefined ||
+        diffAndRevision.revision.comment === null ||
+        diffAndRevision.revision.comment === undefined ||
+            diffAndRevision.revision.userid === null ||
+            diffAndRevision.revision.userid === undefined ||
+            diffAndRevision.revision.tags === null ||
+            diffAndRevision.revision.tags === undefined) {
+            continue;
+        }
+
+        if (diffAndRevision.revision.comment.toLowerCase().includes('new section')
+            && !diffAndRevision.revision.comment.toLowerCase()
+                .includes('semi-protected edit request') // don't show semi-protected edit requests
+            && diffAndRevision.revision.userid !== 4936590) { // don't show signbot topics
+            // see if this section was reverted in previous iterations
+            var wasReverted = false;
+            if (index - 1 > 0) {
+                var nextDiffAndRevision = talkDiffAndRevisions[index - 1];
+                if (nextDiffAndRevision.revision.userid === 4936590) { // signbot,
+                    // look for next revision
+                    if (index - 2 > 0) {
+                        nextDiffAndRevision = talkDiffAndRevisions[index - 2];
+                    }
+                }
+                if (nextDiffAndRevision.revision.tags.includes('mw-undo') ||
+                    nextDiffAndRevision.revision.tags.includes('mw-rollback')) {
+                    wasReverted = true;
+                }
+            }
+            if (wasReverted === false) {
+                newSectionTalkPageDiffAndRevisions.push(diffAndRevision);
+            }
+        }
+    }
 
     return newSectionTalkPageDiffAndRevisions;
 }
 
 function getLargestDiffLine(diffBody) {
+
+    if (diffBody === null ||
+        diffBody === undefined ||
+        diffBody.diff === null ||
+        diffBody.diff === undefined) {
+        return null;
+    }
+
     diffBody.diff.sort(function(a, b) {
+
+        if (b.characterChange === null ||
+        b.characterChange === undefined ||
+            a.characterChange === null ||
+            a.characterChange === undefined) {
+            return 0;
+        }
+
         return b.characterChange.totalCount() - a.characterChange.totalCount();
     });
 
-    // todo: safety
-    const largestDiffLine = diffBody.diff[0];
-    return largestDiffLine;
+    if (diffBody.diff.length > 0) {
+        const largestDiffLine = diffBody.diff[0];
+        return largestDiffLine;
+    }
+
+    return null;
 }
 
 function getLargestDiffLineOfAdded(diffBody) {
+
+    if (diffBody === null ||
+        diffBody === undefined ||
+        diffBody.diff === null ||
+        diffBody.diff === undefined) {
+        return null;
+    }
+
     diffBody.diff.sort(function(a, b) {
+
+        if (b.characterChange === null ||
+            b.characterChange === undefined ||
+            a.characterChange === null ||
+            a.characterChange === undefined) {
+            return 0;
+        }
+
         return b.characterChange.addedCount - a.characterChange.addedCount;
     });
 
-    // todo: safety
-    const largestDiffLine = diffBody.diff[0];
-    return largestDiffLine;
+    if (diffBody.diff.length > 0) {
+        const largestDiffLine = diffBody.diff[0];
+        return largestDiffLine;
+    }
+
+    return null;
 }
 
 function textContainsEmptyLineOrSection(text) {
+
+    if (text === null ||
+    text === undefined) {
+        return false;
+    }
+
     const trimmedText = text.trim();
     return (trimmedText.length === 0 || text.includes('=='));
 }
 
 function getFirstDiffLineWithContent(diffBody) {
 
+    if (diffBody === null ||
+        diffBody === undefined ||
+        diffBody.diff === null ||
+        diffBody.diff === undefined) {
+        return null;
+    }
+
     for (let i = 0; i < diffBody.diff.length; i++) {
         const diff = diffBody.diff[i];
+
+        if (diff.type === null ||
+        diff.type === undefined ||
+            diff.text === null ||
+            diff.text === undefined) {
+            continue;
+        }
 
         switch (diff.type) {
             case 0: // Context line type
@@ -1105,22 +1384,47 @@ function getFirstDiffLineWithContent(diffBody) {
 
 function sortOutput(output) {
 
+    if (output === null ||
+    output === undefined) {
+        return null;
+    }
+
     // sort by date
     return output.sort(function(a, b) {
+
+        if (b.timestamp === null ||
+        b.timestamp === undefined ||
+        a.timestamp === null ||
+        a.timestamp === undefined) {
+            return 0;
+        }
+
         return new Date(b.timestamp) - new Date(a.timestamp);
     });
 }
 
 function cleanOutput(output) {
 
+    if (output === null ||
+    output === undefined) {
+        return null;
+    }
+
     // collapses small changes, converts large changes only to info needed
 
     const cleanedOutput = [];
     let numSmallChanges = 0;
-    output.forEach(function (item) {
+    for (var i = 0; i < output.length; i++) {
+        const item = output[i];
+
+        if (item.outputType === null ||
+        item.outputType === undefined) {
+            continue;
+        }
+
         if (item.outputType === 'small-change') {
             numSmallChanges++;
-            return;
+            continue;
         } else {
             if (numSmallChanges > 0) {
                 const change = new ConsolidatedSmallOutput(numSmallChanges);
@@ -1136,7 +1440,7 @@ function cleanOutput(output) {
                 cleanedOutput.push(item);
             }
         }
-    });
+    }
 
     if (numSmallChanges > 0) {
         const change = new ConsolidatedSmallOutput(numSmallChanges);
@@ -1148,6 +1452,11 @@ function cleanOutput(output) {
 }
 
 function editCountsAndGroupsPromise(req, cleanedOutput) {
+
+    if (cleanedOutput === undefined ||
+    cleanedOutput === null) {
+        return null;
+    }
 
     // gather unique userids
     var userids = [];
@@ -1163,16 +1472,35 @@ function editCountsAndGroupsPromise(req, cleanedOutput) {
     return mwapi.queryForUsers(req, dedupedIds)
         .then( (response) => {
             // distribute results back into cleanedOutput
+
+            if (response.body === null ||
+            response.body === undefined ||
+            response.body.query === null ||
+            response.body.query === undefined ||
+            response.body.query.users === null ||
+            response.body.query.users === undefined) {
+                return cleanedOutput;
+            }
+
             const users = response.body.query.users;
             users.forEach( (user) => {
                 cleanedOutput.forEach( (outputItem) => {
-                    if (outputItem.userid === user.userid) {
-                        outputItem.userGroups = user.groups;
-                        outputItem.userEditCount = user.editcount;
+
+                    if (outputItem.userid !== null &&
+                    outputItem.userid !== undefined &&
+                    user.userid !== null &&
+                    user.userid !== undefined) {
+                        if (outputItem.userid === user.userid) {
+                            outputItem.userGroups = user.groups;
+                            outputItem.userEditCount = user.editcount;
+                        }
                     }
                 });
             });
 
+            return cleanedOutput;
+        })
+        .catch( (e) => {
             return cleanedOutput;
         });
 }
@@ -1183,6 +1511,11 @@ function isRequestingFirstPage(req) {
 
 function shaFromSortedOutput(req, sortedOutput) {
 
+    if (sortedOutput === null ||
+    sortedOutput === undefined) {
+        return null;
+    }
+
     if (!isRequestingFirstPage(req)) {
         return null;
     }
@@ -1191,6 +1524,14 @@ function shaFromSortedOutput(req, sortedOutput) {
     var shaRevID;
     for (var i = 0; i < sortedOutput.length; i++) {
         const output = sortedOutput[i];
+
+        if (output.outputType === undefined ||
+            output.outputType === null ||
+            output.revid === undefined ||
+            output.revid === null) {
+            continue;
+        }
+
         if (output.outputType === 'large-change') {
             shaTitle = req.params.title;
             shaRevID = output.revid;
@@ -1209,6 +1550,13 @@ function shaFromSortedOutput(req, sortedOutput) {
         // grab first item, even if it's a small type
         for (var s = 0; s < sortedOutput.length; s++) {
             const output = sortedOutput[s];
+            if (output.outputType === undefined ||
+                output.outputType === null ||
+                output.revid === undefined ||
+                output.revid === null) {
+                continue;
+            }
+
             if (output.outputType === 'small-change') {
                 shaTitle = req.params.title;
                 shaRevID = output.revid;
@@ -1225,6 +1573,13 @@ function shaFromSortedOutput(req, sortedOutput) {
     return tUtil.createSha256(`${shaTitle}${shaRevID}`);
 }
 
+class MalformedArticleRevisionResponse extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'MalformedArticleRevisionResponse';
+    }
+}
+
 function getSignificantEvents(req, res) {
 
     // STEP 1: Gather list of article revisions
@@ -1233,6 +1588,20 @@ function getSignificantEvents(req, res) {
 
             // STEP 2: All at once gather diffs for each uncached revision and list of
             // talk page revisions
+
+            if (response.body === undefined ||
+            response.body === null ||
+            response.body.query === undefined ||
+            response.body.query === null ||
+            response.body.query.pages === undefined ||
+            response.body.query.pages === null ||
+            response.body.query.pages[0] === undefined ||
+            response.body.query.pages[0] === null ||
+                response.body.query.pages[0].revisions === undefined ||
+                response.body.query.pages[0].revisions === null) {
+                throw new MalformedArticleRevisionResponse();
+            }
+
             const revisions = response.body.query.pages[0].revisions;
 
             // BEGIN: PAGE CUTOFF LOGIC
@@ -1241,9 +1610,14 @@ function getSignificantEvents(req, res) {
             const cutoff = latestAndEarliestCachedRevisionTimestamp(req);
             var filteredRevisions;
             const isMaxedOut = cacheForTitleIsMaxedOut(req);
-            if (isMaxedOut && cutoff.earliestTimestamp) {
-                filteredRevisions = revisions.filter(revision => new Date(revision.timestamp) >
-                    new Date(cutoff.earliestTimestamp));
+            if (isMaxedOut && cutoff && cutoff.earliestTimestamp) {
+                filteredRevisions = revisions.filter((revision) => {
+                    if (revision.timestamp === undefined || revision.timestamp === null ||
+                    cutoff.earliestTimestamp === undefined || cutoff.earliestTimestamp === null) {
+                        return 0;
+                    }
+                    return new Date(revision.timestamp) > new Date(cutoff.earliestTimestamp);
+                });
             } else {
                 filteredRevisions = revisions;
             }
@@ -1254,7 +1628,15 @@ function getSignificantEvents(req, res) {
             var needsCacheCleanup = false;
             if (isMaxedOut) {
                 for (var i = 0; i < filteredRevisions.length; i++) {
+
                     const revision = filteredRevisions[i];
+
+                    if (revision.timestamp === undefined || revision.timestamp === null ||
+                        cutoff.earliestTimestamp === undefined ||
+                        cutoff.earliestTimestamp === null) {
+                        continue;
+                    }
+
                     const timestamp = new Date(revision.timestamp);
                     const latestCacheTimestamp = new Date(cutoff.latestTimestamp);
                     if (timestamp > latestCacheTimestamp) {
@@ -1265,13 +1647,14 @@ function getSignificantEvents(req, res) {
             }
             // END: PAGE CUTOFF LOGIC
 
-            var nextRvStartId;
-            var talkPageRvStartId;
-            var talkPageRvEndId;
+            var nextRvStartId = null;
+            var talkPageRvStartId = null;
+            var talkPageRvEndId = null;
             if (filteredRevisions && filteredRevisions.length > 0) {
                 const earliestRevision = filteredRevisions[filteredRevisions.length - 1];
                 const latestRevision = filteredRevisions[0];
-                if (earliestRevision.parentid) {
+                if (earliestRevision.parentid !== null && earliestRevision.parentid !== undefined
+                && latestRevision.timestamp !== null && latestRevision.timestamp !== undefined) {
                     nextRvStartId = earliestRevision.parentid;
                     // if rvstartid is missing from query, they are fetching the first page
                     // if they are fetching the first page, we don't want to block of
@@ -1281,11 +1664,6 @@ function getSignificantEvents(req, res) {
                         latestRevision.timestamp;
                     talkPageRvEndId = earliestRevision.timestamp;
                 }
-
-            } else {
-                nextRvStartId = null;
-                talkPageRvStartId = null;
-                talkPageRvEndId = null;
             }
 
             const articleEvalResults = getCachedAndUncachedItems(filteredRevisions, req, null);
@@ -1315,7 +1693,15 @@ function getSignificantEvents(req, res) {
             const nextRvStartId = response.nextRvStartId;
             const needsCacheCleanup = response.needsCacheCleanup;
 
-            if (response.talkPageRevisions) {
+            if (response.talkPageRevisions !== undefined && response.talkPageRevisions !== null &&
+                response.talkPageRevisions.body !== undefined &&
+                response.talkPageRevisions.body !== null &&
+                response.talkPageRevisions.body.query !== undefined &&
+                response.talkPageRevisions.body.query !== null &&
+                response.talkPageRevisions.body.query.pages[0] !== undefined &&
+                response.talkPageRevisions.body.query.pages[0] !== null &&
+                response.talkPageRevisions.body.query.pages[0].revisions !== undefined &&
+                response.talkPageRevisions.body.query.pages[0].revisions !== null) {
                 const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
                 const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions,
                     req, talkPageTitle(req));
@@ -1328,7 +1714,7 @@ function getSignificantEvents(req, res) {
                     .then( (response) => {
                         return Object.assign({
                             articleDiffAndRevisions: articleDiffAndRevisions,
-                            talkDiffAndRevisions: response.filter(x => x !== null),
+                            talkDiffAndRevisions: response,
                             nextRvStartId: nextRvStartId,
                             needsCacheCleanup: needsCacheCleanup,
                             finalOutput: finalOutput
@@ -1366,11 +1752,30 @@ function getSignificantEvents(req, res) {
 
             // segment off into types
             var uncachedOutput = [];
-            response.articleDiffAndRevisions.forEach(function (diffAndRevision) {
+
+            for (var i = 0; i < response.articleDiffAndRevisions.length; i++) {
+                const diffAndRevision = response.articleDiffAndRevisions[i];
+
+                if (diffAndRevision.revision === undefined || diffAndRevision.revision === null) {
+                    continue;
+                }
+
                 const revision = diffAndRevision.revision;
-                if (revision.tags.includes('mw-rollback') &&
+
+                // edge case in case one of the diff endpoints fail...fallback to small type
+                if (diffAndRevision.body === undefined || diffAndRevision.body === null) {
+                    const smallOutputObject = new SmallOutput(revision.revid,
+                        revision.timestamp, revision.user, revision.userid);
+                    uncachedOutput.push(smallOutputObject);
+                    continue;
+                }
+
+                if (revision.tags !== undefined && revision.tags !== null &&
+                    revision.tags.includes('mw-rollback') &&
+                    revision.comment !== undefined || revision.comment !== null &&
                     revision.comment.toLowerCase().includes('revert') &&
-                    revision.comment.toLowerCase().includes('vandalism')) {
+                    revision.comment.toLowerCase().includes('vandalism') &&
+                    diffAndRevision.body !== null && diffAndRevision.body !== undefined) {
                     const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
                     const section = getSectionForDiffLine(diffAndRevision.body,
                         largestDiffLine);
@@ -1381,11 +1786,14 @@ function getSignificantEvents(req, res) {
                 } else {
 
                     var significantChanges = [];
-                    if (diffAndRevision.templates && diffAndRevision.templates.length > 0) {
+                    if (diffAndRevision.templates !== undefined &&
+                        diffAndRevision.templates !== null &&
+                        diffAndRevision.templates.length > 0) {
                         var sections = [];
                         // todo: this section determination seems broken.
                         // multiple templates can occur on multiple lines.
-                        if (diffAndRevision.templateDiffLine) {
+                        if (diffAndRevision.templateDiffLine !== undefined &&
+                        diffAndRevision.templateDiffLine !== null) {
                             const section = getSectionForDiffLine(diffAndRevision.body,
                                 diffAndRevision.templateDiffLine);
                             if (section) {
@@ -1397,15 +1805,22 @@ function getSignificantEvents(req, res) {
                         significantChanges.push(newReferenceOutputObject);
                     }
 
-                    if (diffAndRevision.characterChangeWithSections.counts.totalCount() >
+                    if (diffAndRevision.characterChangeWithSections !== undefined &&
+                        diffAndRevision.characterChangeWithSections !== null &&
+                        diffAndRevision.characterChangeWithSections.counts !== undefined &&
+                        diffAndRevision.characterChangeWithSections.counts !== null &&
+                        diffAndRevision.characterChangeWithSections.counts.totalCount() >
                         threshold) {
 
                         if (diffAndRevision.characterChangeWithSections.counts.addedCount > 0) {
                             const largestDiffLine = getLargestDiffLineOfAdded(diffAndRevision.body);
-                            const addedTextOutputObject = new AddedTextOutputExpanded(
-                                diffAndRevision.characterChangeWithSections, largestDiffLine.text,
-                                largestDiffLine.type, largestDiffLine.highlightRanges);
-                            significantChanges.push(addedTextOutputObject);
+                            if (largestDiffLine !== undefined && largestDiffLine !== null) {
+                                const addedTextOutputObject = new AddedTextOutputExpanded(
+                                    diffAndRevision.characterChangeWithSections,
+                                    largestDiffLine.text,
+                                    largestDiffLine.type, largestDiffLine.highlightRanges);
+                                significantChanges.push(addedTextOutputObject);
+                            }
                         }
 
                         if (diffAndRevision.characterChangeWithSections.counts.deletedCount > 0) {
@@ -1425,23 +1840,43 @@ function getSignificantEvents(req, res) {
                         uncachedOutput.push(smallOutputObject);
                     }
                 }
-            });
+            }
 
             // get new talk page revisions, add to uncachedOutput. it will be sorted later.
-            if (response.talkDiffAndRevisions) {
+            if (response.talkDiffAndRevisions !== undefined &&
+                response.talkDiffAndRevisions !== null) {
                 const newTopicDiffAndRevisions = getNewTopicDiffAndRevisions(
                     response.talkDiffAndRevisions);
-                newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
-                    const revision = diffAndRevision.revision;
-                    const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
-                    const section = getSectionForDiffLine(diffAndRevision.body,
-                        firstDiffLine);
-                    const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
-                        revision.revid,revision.timestamp, revision.user, revision.userid,
-                        firstDiffLine.text,firstDiffLine.type, firstDiffLine.highlightRanges,
-                        diffAndRevision.characterChangeWithSections.counts, section);
-                    uncachedOutput.push(newTalkPageTopicOutputObject);
-                });
+                if (newTopicDiffAndRevisions !== undefined && newTopicDiffAndRevisions !== null) {
+                    newTopicDiffAndRevisions.forEach(function (diffAndRevision) {
+                        const revision = diffAndRevision.revision;
+
+                        const nullSnippetTalkPageObject = new NewTalkPageTopicExtended(
+                            revision.revid,revision.timestamp, revision.user, revision.userid,
+                            null,null, null, null);
+                        if (diffAndRevision.body !== undefined && diffAndRevision.body !== null) {
+                            const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
+                            if (firstDiffLine !== undefined && firstDiffLine !== null) {
+                                const section = getSectionForDiffLine(diffAndRevision.body,
+                                    firstDiffLine);
+                                const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
+                                    revision.revid,revision.timestamp, revision.user,
+                                    revision.userid,
+                                    firstDiffLine.text,firstDiffLine.type,
+                                    firstDiffLine.highlightRanges,
+                                    diffAndRevision.characterChangeWithSections.counts, section);
+                                uncachedOutput.push(newTalkPageTopicOutputObject);
+                            } else {
+                                uncachedOutput.push(nullSnippetTalkPageObject);
+                            }
+                        } else {
+                            const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
+                                revision.revid,revision.timestamp, revision.user, revision.userid,
+                                null,null, null, null);
+                            uncachedOutput.push(nullSnippetTalkPageObject);
+                        }
+                    });
+                }
             }
 
             return Object.assign({ nextRvStartId: response.nextRvStartId,
@@ -1452,8 +1887,14 @@ function getSignificantEvents(req, res) {
         .then( (response) => {
 
             var preformattedSnippets = [];
-            response.uncachedOutput.forEach(function (item) {
-                if (item.outputType === 'new-talk-page-topic') {
+            for (var o = 0; o < response.uncachedOutput.length; o++) {
+                const item = response.uncachedOutput[o];
+
+                if (item.outputType === undefined || item.outputType === null) {
+                    continue;
+                }
+
+                if (item.outputType === 'new-talk-page-topic' && item.snippet !== null) {
                     const snippet = new PreformattedSnippet(item.revid, item.outputType,
                         item.snippet,1, null,
                         null);
@@ -1461,6 +1902,16 @@ function getSignificantEvents(req, res) {
                 } else if (item.outputType === 'large-change') {
                     for (let i = 0; i < item.significantChanges.length; i++) {
                         const significantChange = item.significantChanges[i];
+
+                        if (significantChange.outputType === undefined ||
+                            significantChange.outputType === null ||
+                            significantChange.snippet === undefined ||
+                            significantChange.snippet === null ||
+                            significantChange.snippetType === undefined ||
+                            significantChange.snippetType === null) {
+                            continue;
+                        }
+
                         if (significantChange.outputType === 'added-text') {
                             const snippet = new PreformattedSnippet(item.revid, item.outputType,
                                 significantChange.snippet, significantChange.snippetType,
@@ -1469,37 +1920,58 @@ function getSignificantEvents(req, res) {
                         }
                     }
                 }
-            });
+            }
 
             // convert large snippets from wikitext to mobile-html
             return snippetPromises(req, preformattedSnippets)
                 .then( (formattedSnippets) => {
 
                     // reassign formattedSnippets to snippet output
-                    formattedSnippets.forEach((formattedSnippet) => {
-                       response.uncachedOutput.forEach((item) => {
-                           if (item.revid === formattedSnippet.revid &&
-                               item.outputType === formattedSnippet.outputType) {
-                               if (formattedSnippet.outputType === 'new-talk-page-topic') {
-                                   item.snippet = formattedSnippet.snippet;
-                               } else if (formattedSnippet.outputType === 'large-change') {
-                                   if (item.significantChanges.length >
-                                       formattedSnippet.indexOfSignificantChanges) {
-                                       var significantChange =
-                                           item.significantChanges[
-                                               formattedSnippet.indexOfSignificantChanges
-                                               ];
-                                       significantChange.snippet = formattedSnippet.snippet;
-                                       if (significantChange.outputType === 'added-text') {
-                                           item.significantChanges[
-                                               formattedSnippet.indexOfSignificantChanges
-                                               ] = new AddedTextOutput(significantChange);
-                                       }
-                                   }
-                               }
-                           }
-                       });
-                    });
+                    for (var fs = 0; fs < formattedSnippets.length; fs++) {
+                        const formattedSnippet = formattedSnippets[fs];
+
+                        for (var i = 0; i < response.uncachedOutput.length; i++) {
+                            const item = response.uncachedOutput[i];
+
+                            if (item.revid === undefined || item.revid === null ||
+                                formattedSnippet.revid === undefined ||
+                                formattedSnippet.revid === null ||
+                                item.outputType === undefined || item.outputType === null ||
+                                formattedSnippet.outputType === undefined ||
+                                formattedSnippet.outputType === null) {
+                                continue;
+                            }
+
+                            if (item.revid === formattedSnippet.revid &&
+                                item.outputType === formattedSnippet.outputType) {
+                                if (formattedSnippet.outputType === 'new-talk-page-topic') {
+                                    item.snippet = formattedSnippet.snippet;
+                                } else if (formattedSnippet.outputType === 'large-change') {
+
+                                    if (item.significantChanges === undefined ||
+                                        item.significantChanges === null ||
+                                        formattedSnippet.indexOfSignificantChanges === undefined ||
+                                        formattedSnippet.indexOfSignificantChanges === null) {
+                                        continue;
+                                    }
+
+                                    if (item.significantChanges.length >
+                                        formattedSnippet.indexOfSignificantChanges) {
+                                        var significantChange =
+                                            item.significantChanges[
+                                                formattedSnippet.indexOfSignificantChanges
+                                                ];
+                                        significantChange.snippet = formattedSnippet.snippet;
+                                        if (significantChange.outputType === 'added-text') {
+                                            item.significantChanges[
+                                                formattedSnippet.indexOfSignificantChanges
+                                                ] = new AddedTextOutput(significantChange);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // push to final output and cache
                     // note we are using original response list, not snippet response
