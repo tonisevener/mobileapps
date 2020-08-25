@@ -516,6 +516,21 @@ const snippetPromise = (req, preformattedSnippet) => {
                 const firstStart = response.indexOf('ioshighlightstart');
                 const lastStart = response.lastIndexOf('ioshighlightend');
 
+                // early exit here - some highlighting was inadvertantly pruned out,
+                // so don't attempt to truncate or preserve highlight delimiters
+                if (firstStart === -1 || lastStart === -1) {
+                    if (firstStart === -1 && lastStart !== -1) {
+                        truncatedSnippet = truncatedSnippet.replace(/ioshighlightend/g, '');
+                    }
+
+                    if (firstStart !== -1 && lastStart === -1) {
+                        truncatedSnippet = truncatedSnippet.replace(/ioshighlightstart/g, '');
+                    }
+
+                    preformattedSnippet.snippet = truncatedSnippet;
+                    return preformattedSnippet;
+                }
+
                 // If highlighting starts at the beginning of the line, don't
                 // truncate or prepend ...
                 // Otherwise truncate and prepend ...
@@ -848,11 +863,13 @@ function getSectionForDiffLine(diffBody, diffLine) {
     // In this case javascript evaluates diffLine.offset.from to false,
     // hence the need for the separate check.
     if ((diffLine.offset.from || diffLine.offset.from === 0) &&
+        diffBody.from.sections && diffBody.from.sections.length > 0 &&
         diffLine.offset.from < diffBody.from.sections[0].offset) {
         fromSection = 'Intro';
     }
 
     if ((diffLine.offset.to || diffLine.offset.to === 0) &&
+        diffBody.to.sections && diffBody.to.sections.length > 0 &&
         diffLine.offset.to < diffBody.to.sections[0].offset) {
         toSection = 'Intro';
     }
@@ -1824,8 +1841,10 @@ function getSignificantEvents(req, res) {
                     const sections = allChangedDiffLines.map(diffLine =>
                         getSectionForDiffLine(diffAndRevision.body,
                         diffLine));
+                    const dedupedSections = new Set(sections);
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
-                        revision.timestamp, revision.user, revision.userid, sections);
+                        revision.timestamp, revision.user, revision.userid,
+                        Array.from(dedupedSections));
                     uncachedOutput.push(vandalismRevertOutputObject);
                 } else {
 
