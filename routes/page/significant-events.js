@@ -1078,8 +1078,7 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 
 // BUG: https://en.wikipedia.org/w/index.php?title=United_States&type=revision
 // &diff=965295364&oldid=965071033
-// We are missing some an added reference from line 722. We also aren't
-// catching the <ref> tags in line 579
+// Should we be catching added <ref> tags?
 // ANOTHER BUG:
 // Sometimes new citations have spaces within deemed the same, so only part of it
 // is sent in as text whereas we need all of cite.
@@ -1097,7 +1096,21 @@ function structuredTemplatePromise(text, diffItem, revision) {
                 ParsoidJS.toWikitext);
             var templateObjects = [];
 
-            for (var s = 0; s < splitTemplates.length; s++) {
+            // Note: for now just grabbing the first split template
+            // (which includes only parent templates and not nested)
+            // to avoid duplicate template problem. If we need nested support we can loop through
+            // all split templates, then uniquely identify and dedupe templates later.
+            if (splitTemplates.length === 0) {
+                // bail early
+                const result = Object.assign( {
+                    revision: revision,
+                    diffItem: diffItem,
+                    templates: templateObjects
+                });
+                resolve(result);
+                return;
+            }
+            for (var s = 0; s < 1; s++) {
                 const splitTemplateText = splitTemplates[s];
 
                 const innerPdoc = yield ParsoidJS.parse(splitTemplateText, { pdoc: true });
@@ -1181,35 +1194,111 @@ function addStructuredTemplates(diffAndRevisions) {
                     }
                     break;
                 case 5:
-                case 3:
+                case 3: {
 
+                    const binaryText = encoding.strToBin(diffItem.text);
+                    var previousBinaryRangeText = null;
+                    var previousRangeEndIndex = null;
                     for (var h = 0; h < diffItem.highlightRanges.length; h++) {
                         const range = diffItem.highlightRanges[h];
 
                         if (range.start === undefined ||
-                        range.start === null ||
-                        range.length === undefined ||
-                        range.length === null) {
+                            range.start === null ||
+                            range.length === undefined ||
+                            range.length === null) {
                             continue;
                         }
 
-                        const binaryText = encoding.strToBin(diffItem.text);
-                        const binaryRangeText = binaryText.substring(range.start,
-                            range.start + range.length);
-                        const rangeText = encoding.binToStr(binaryRangeText);
-
                         switch (range.type) {
-                            case 0: // Add range type
-                                if (needsToParseForAddedTemplates(rangeText, true)) {
-                                    promises.push(structuredTemplatePromise(rangeText, diffItem,
-                                        diffAndRevision.revision));
+                            case 0: { // Add range type
+
+                                const binaryRangeText = binaryText.substring(range.start,
+                                    range.start + range.length);
+                                if (previousBinaryRangeText !== null &&
+                                    previousRangeEndIndex !== null) {
+
+                                    const inBetweenText = binaryText.substring(
+                                        previousRangeEndIndex,
+                                        range.start);
+                                    if (inBetweenText === ' ') {
+                                        previousBinaryRangeText += inBetweenText;
+                                        previousBinaryRangeText += binaryRangeText;
+                                        previousRangeEndIndex = range.start + range.length;
+                                        continue;
+                                    } else {
+                                        // before attempting to send off for template parsing,
+                                        // grab following '}}' to capture edge case templates
+                                        const nextTwoCharacters = binaryText
+                                            .substring(previousRangeEndIndex,
+                                            previousRangeEndIndex + 2);
+                                        if (nextTwoCharacters === '}}') {
+                                            previousBinaryRangeText += '}}';
+                                        }
+                                        const rangeText = encoding
+                                            .binToStr(previousBinaryRangeText);
+                                        if (needsToParseForAddedTemplates(rangeText,
+                                            true)) {
+                                            promises.push(structuredTemplatePromise(rangeText,
+                                                diffItem,
+                                                diffAndRevision.revision));
+                                        }
+
+                                        previousBinaryRangeText = binaryRangeText;
+                                        previousRangeEndIndex = range.start + range.length;
+                                    }
+
+                                } else {
+                                    previousBinaryRangeText = binaryRangeText;
+                                    previousRangeEndIndex = range.start + range.length;
+                                    continue;
                                 }
+                            }
                                 break;
-                            default:
-                                break;
+                            case 1: // Deleted
+                                // if there's a space before deleted text, include it
+                                // so it gets picked up in inBetweenText check up there
+                                // const textBeforeDeleted = binaryText.substring(range.start - 1,
+                                //     (range.start - 1) + 1);
+                                // if (textBeforeDeleted === ' ') {
+                                //     previousRangeEndIndex = range.start - 1;
+                                // } else {
+                                //     previousRangeEndIndex = range.start + range.length;
+                                // }
+
+                                previousRangeEndIndex = range.start + range.length;
+
+                        }
+                    }
+
+                    // there's probably one last straggler range that we haven't checked
+                    // due to how we're doing things
+
+                    if (previousBinaryRangeText !== null && previousRangeEndIndex !== null) {
+
+                        // before attempting to send off for template parsing,
+                        // grab following '}}' to capture edge case templates
+                        const nextTwoCharacters = binaryText.substring(previousRangeEndIndex,
+                            previousRangeEndIndex + 2);
+                        if (nextTwoCharacters === '}}') {
+                            previousBinaryRangeText += '}}';
+                        }
+
+                        // also if first 2 characters start with '}}', it might throw things off
+                        const firstTwoCharacters = previousBinaryRangeText.substring(0,
+                            2);
+                        if (firstTwoCharacters === '}}') {
+                            previousBinaryRangeText = previousBinaryRangeText.substring(2,
+                                previousBinaryRangeText.length);
+                        }
+
+                        const rangeText = encoding.binToStr(previousBinaryRangeText);
+                        if (needsToParseForAddedTemplates(rangeText, true)) {
+                            promises.push(structuredTemplatePromise(rangeText, diffItem,
+                                diffAndRevision.revision));
                         }
                     }
                     break;
+                }
                 default:
                     break;
             }
