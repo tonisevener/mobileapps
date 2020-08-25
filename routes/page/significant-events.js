@@ -379,6 +379,50 @@ const formattedSnippetFromTextPromise = (req, text) => {
         });
 };
 
+function stripDeletedRangesFromBinaryText(binaryText, highlightedRanges) {
+    // first strip deleted text
+    for (var d = highlightedRanges.length - 1; d >= 0; d-- ) {
+        const range = highlightedRanges[d];
+
+        switch (range.type) {
+            case 0: // Added
+                break;
+            case 1: // Deleted
+                binaryText = stringByRemovingSubstring(binaryText, range.start,
+                    range.start + range.length);
+
+                for (var i = d; i < highlightedRanges.length;
+                     i++) {
+                    const iRange = highlightedRanges[i];
+                    switch (iRange.type) {
+                        case 0: // Added
+                            iRange.start -= range.length;
+                            highlightedRanges[i] = iRange;
+                            break;
+                        case 1: // Deleted
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    // filter out deleted ranges
+    // eslint-disable-next-line no-case-declarations
+    const addedHighlightRanges = highlightedRanges
+        .filter(range => range.type !== null && range.type !== undefined &&
+            range.type === 0);
+
+    return Object.assign({
+        strippedBinaryText: binaryText,
+        addedHighlightRanges: addedHighlightRanges
+    });
+}
+
 const snippetPromise = (req, preformattedSnippet) => {
 
     if (preformattedSnippet.snippet === null ||
@@ -412,49 +456,17 @@ const snippetPromise = (req, preformattedSnippet) => {
                 // should be caught earlier
                 break;
             case 5:
-            case 3: // Added and deleted words in line
+            case 3: { // Added and deleted words in line
 
                 if (preformattedSnippet.snippetHighlightRanges === null ||
-                preformattedSnippet.snippetHighlightRanges === undefined) {
+                    preformattedSnippet.snippetHighlightRanges === undefined) {
                     break;
                 }
 
-                // first strip deleted text
-                for (var d = preformattedSnippet.snippetHighlightRanges.length - 1; d >= 0; d-- ) {
-                    const range = preformattedSnippet.snippetHighlightRanges[d];
-
-                    switch (range.type) {
-                        case 0: // Added
-                            break;
-                        case 1: // Deleted
-                            snippetBinary = stringByRemovingSubstring(snippetBinary, range.start,
-                                range.start + range.length);
-
-                            for (var i = d; i < preformattedSnippet.snippetHighlightRanges.length;
-                                 i++) {
-                                const iRange = preformattedSnippet.snippetHighlightRanges[i];
-                                switch (iRange.type) {
-                                    case 0: // Added
-                                        iRange.start -= range.length;
-                                        preformattedSnippet.snippetHighlightRanges[i] = iRange;
-                                        break;
-                                    case 1: // Deleted
-                                        break;
-                                    default:
-                                        break;
-                                }
-                            }
-                            break;
-                        default:
-                            break;
-                    }
-                }
-
-                // filter out deleted ranges
-                // eslint-disable-next-line no-case-declarations
-                const addedHighlightRanges = preformattedSnippet.snippetHighlightRanges
-                    .filter(range => range.type !== null && range.type !== undefined &&
-                        range.type === 0);
+                const strippedResult = stripDeletedRangesFromBinaryText(snippetBinary,
+                    preformattedSnippet.snippetHighlightRanges);
+                snippetBinary = strippedResult.strippedBinaryText;
+                const addedHighlightRanges = strippedResult.addedHighlightRanges;
 
                 // then add added text delimiters
                 var addOffset = 0;
@@ -479,6 +491,7 @@ const snippetPromise = (req, preformattedSnippet) => {
                     addOffset += highlightEndBin.length;
                 });
                 break;
+            }
             default:
                 break;
         }
@@ -1079,15 +1092,8 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 // BUG: https://en.wikipedia.org/w/index.php?title=United_States&type=revision
 // &diff=965295364&oldid=965071033
 // Should we be catching added <ref> tags?
-// ANOTHER BUG:
-// Sometimes new citations have spaces within deemed the same, so only part of it
-// is sent in as text whereas we need all of cite.
-// See here
-// https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=971349395&oldid=971332725
-// Also this one
+// This one just seems to have moved paragraphs. Seems like we shouldn't return a new citation here.
 // https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=971260075&oldid=971259267
-// Definitely some mangled 'added-text' snippets going on here.
-// https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=970665187&oldid=970577931
 function structuredTemplatePromise(text, diffItem, revision) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
@@ -1196,9 +1202,20 @@ function addStructuredTemplates(diffAndRevisions) {
                 case 5:
                 case 3: {
 
-                    const binaryText = encoding.strToBin(diffItem.text);
+                    var binaryText = encoding.strToBin(diffItem.text);
+
+                    // strip deleted ranges from text, this simplifies template detection later
+                    const strippedResult = stripDeletedRangesFromBinaryText(binaryText,
+                        diffItem.highlightRanges);
+                    binaryText = strippedResult.strippedBinaryText;
+                    diffItem.highlightRanges = strippedResult.addedHighlightRanges;
+
+                    // now loop through added highlighted ranges,
+                    // fuzzying things to capture full citations
+                    // and generate templates.
                     var previousBinaryRangeText = null;
                     var previousRangeEndIndex = null;
+
                     for (var h = 0; h < diffItem.highlightRanges.length; h++) {
                         const range = diffItem.highlightRanges[h];
 
@@ -1220,6 +1237,9 @@ function addStructuredTemplates(diffAndRevisions) {
                                     const inBetweenText = binaryText.substring(
                                         previousRangeEndIndex,
                                         range.start);
+                                    // if an empty space is all that exists between added ranges,
+                                    // lump it in with previous range in case it is splitting
+                                    // up a new citation
                                     if (inBetweenText === ' ') {
                                         previousBinaryRangeText += inBetweenText;
                                         previousBinaryRangeText += binaryRangeText;
@@ -1253,19 +1273,9 @@ function addStructuredTemplates(diffAndRevisions) {
                                     continue;
                                 }
                             }
+                            break;
+                            default:
                                 break;
-                            case 1: // Deleted
-                                // if there's a space before deleted text, include it
-                                // so it gets picked up in inBetweenText check up there
-                                // const textBeforeDeleted = binaryText.substring(range.start - 1,
-                                //     (range.start - 1) + 1);
-                                // if (textBeforeDeleted === ' ') {
-                                //     previousRangeEndIndex = range.start - 1;
-                                // } else {
-                                //     previousRangeEndIndex = range.start + range.length;
-                                // }
-
-                                previousRangeEndIndex = range.start + range.length;
 
                         }
                     }
