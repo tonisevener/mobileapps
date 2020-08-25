@@ -94,13 +94,13 @@ class ConsolidatedSmallOutput {
 }
 
 class VandalismOutput {
-    constructor(revid, timestamp, user, userid, section) {
+    constructor(revid, timestamp, user, userid, sections) {
         this.revid = revid;
         this.timestamp = timestamp;
         this.outputType = 'vandalism-revert';
         this.user = user;
         this.userid = userid;
-        this.section = section;
+        this.sections = sections;
     }
 }
 
@@ -1072,7 +1072,7 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 // https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=971260075&oldid=971259267
 // Definitely some mangled 'added-text' snippets going on here.
 // https://en.wikipedia.org/w/index.php?title=United_States&type=revision&diff=970665187&oldid=970577931
-function structuredTemplatePromise(text, diff, revision) {
+function structuredTemplatePromise(text, diffItem, revision) {
     return new BBPromise((resolve) => {
         var main = PRFunPromise.async(function*() {
             var pdoc = yield ParsoidJS.parse(text, { pdoc: true });
@@ -1115,7 +1115,7 @@ function structuredTemplatePromise(text, diff, revision) {
             }
             const result = Object.assign( {
                revision: revision,
-                diff: diff,
+                diffItem: diffItem,
                templates: templateObjects
             });
             resolve(result);
@@ -1149,25 +1149,25 @@ function addStructuredTemplates(diffAndRevisions) {
         }
 
         for (var d = 0; d < diffAndRevision.body.diff.length; d++) {
-            const diff = diffAndRevision.body.diff[d];
+            const diffItem = diffAndRevision.body.diff[d];
 
-            if (diff.text === undefined ||
-            diff.text === null) {
+            if (diffItem.text === undefined ||
+                diffItem.text === null) {
                 continue;
             }
 
-            switch (diff.type) {
+            switch (diffItem.type) {
                 case 1: // Add complete line type
-                    if (needsToParseForAddedTemplates(diff.text, true)) {
-                        promises.push(structuredTemplatePromise(diff.text, diff,
+                    if (needsToParseForAddedTemplates(diffItem.text, true)) {
+                        promises.push(structuredTemplatePromise(diffItem.text, diffItem,
                             diffAndRevision.revision));
                     }
                     break;
                 case 5:
                 case 3:
 
-                    for (var h = 0; h < diff.highlightRanges.length; h++) {
-                        const range = diff.highlightRanges[h];
+                    for (var h = 0; h < diffItem.highlightRanges.length; h++) {
+                        const range = diffItem.highlightRanges[h];
 
                         if (range.start === undefined ||
                         range.start === null ||
@@ -1176,7 +1176,7 @@ function addStructuredTemplates(diffAndRevisions) {
                             continue;
                         }
 
-                        const binaryText = encoding.strToBin(diff.text);
+                        const binaryText = encoding.strToBin(diffItem.text);
                         const binaryRangeText = binaryText.substring(range.start,
                             range.start + range.length);
                         const rangeText = encoding.binToStr(binaryRangeText);
@@ -1184,7 +1184,7 @@ function addStructuredTemplates(diffAndRevisions) {
                         switch (range.type) {
                             case 0: // Add range type
                                 if (needsToParseForAddedTemplates(rangeText, true)) {
-                                    promises.push(structuredTemplatePromise(rangeText, diff,
+                                    promises.push(structuredTemplatePromise(rangeText, diffItem,
                                         diffAndRevision.revision));
                                 }
                                 break;
@@ -1204,19 +1204,30 @@ function addStructuredTemplates(diffAndRevisions) {
 
            // loop through responses, add to revision.
 
-            response.forEach( (item) => {
-               diffAndRevisions.forEach( (diffAndRevision) => {
+            diffAndRevisions.forEach( (diffAndRevision) => {
+
+                var templatesAndDiffItems = [];
+                response.forEach( (item) => {
 
                    if (item.revision !== null &&
                    item.revision !== undefined &&
                    diffAndRevision.revision !== null &&
-                   diffAndRevision.revision !== undefined) {
+                   diffAndRevision.revision !== undefined &&
+                   item.templates !== null &&
+                   item.templates !== undefined &&
+                   item.templates.length > 0) {
                        if (item.revision.revid === diffAndRevision.revision.revid) {
-                           diffAndRevision.templates = item.templates;
-                           diffAndRevision.templateDiffLine = item.diff;
+                           const templateAndDiffItem = Object.assign({
+                               templates: item.templates,
+                               diffItem: item.diffItem
+                           });
+
+                           templatesAndDiffItems.push(templateAndDiffItem);
                        }
                    }
                });
+
+                diffAndRevision.templatesAndDiffItems = templatesAndDiffItems;
             });
 
             return diffAndRevisions;
@@ -1274,6 +1285,13 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
     }
 
     return newSectionTalkPageDiffAndRevisions;
+}
+
+function getAllChangedDiffLines(diffBody) {
+    const allChangedDiffLines = diffBody.diff.filter((item) => {
+       return item.type !== 0;
+    });
+    return allChangedDiffLines;
 }
 
 function getLargestDiffLine(diffBody) {
@@ -1802,32 +1820,41 @@ function getSignificantEvents(req, res) {
                     revision.comment.toLowerCase().includes('revert') &&
                     revision.comment.toLowerCase().includes('vandalism') &&
                     diffAndRevision.body !== null && diffAndRevision.body !== undefined) {
-                    const largestDiffLine = getLargestDiffLine(diffAndRevision.body);
-                    const section = getSectionForDiffLine(diffAndRevision.body,
-                        largestDiffLine);
-                    // todo: vandalism type can have reversions in multiple sections
+                    const allChangedDiffLines = getAllChangedDiffLines(diffAndRevision.body);
+                    const sections = allChangedDiffLines.map(diffLine =>
+                        getSectionForDiffLine(diffAndRevision.body,
+                        diffLine));
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
-                        revision.timestamp, revision.user, revision.userid, section);
+                        revision.timestamp, revision.user, revision.userid, sections);
                     uncachedOutput.push(vandalismRevertOutputObject);
                 } else {
 
                     var significantChanges = [];
-                    if (diffAndRevision.templates !== undefined &&
-                        diffAndRevision.templates !== null &&
-                        diffAndRevision.templates.length > 0) {
+                    if (diffAndRevision.templatesAndDiffItems !== undefined &&
+                        diffAndRevision.templatesAndDiffItems !== null &&
+                        diffAndRevision.templatesAndDiffItems.length > 0) {
+
                         var sections = [];
-                        // todo: this section determination seems broken.
-                        // multiple templates can occur on multiple lines.
-                        if (diffAndRevision.templateDiffLine !== undefined &&
-                        diffAndRevision.templateDiffLine !== null) {
+                        var combinedTemplates = [];
+
+                        for (var t = 0; t < diffAndRevision.templatesAndDiffItems.length; t++) {
+                            const templatesAndDiffItem = diffAndRevision.templatesAndDiffItems[t];
+                            const templates = templatesAndDiffItem.templates;
+                            const diffItem = templatesAndDiffItem.diffItem;
                             const section = getSectionForDiffLine(diffAndRevision.body,
-                                diffAndRevision.templateDiffLine);
+                                diffItem);
                             if (section) {
                                 sections.push(section);
                             }
+                            if (templates) {
+                                combinedTemplates.push(templates);
+                            }
                         }
-                        const newReferenceOutputObject = new NewReferenceOutput(sections,
-                            diffAndRevision.templates);
+
+                        const dedupedSections = new Set(sections);
+                        const newReferenceOutputObject =
+                            new NewReferenceOutput(Array.from(dedupedSections),
+                            combinedTemplates);
                         significantChanges.push(newReferenceOutputObject);
                     }
 
