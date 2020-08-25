@@ -106,7 +106,7 @@ class VandalismOutput {
 
 class NewReferenceOutput {
     constructor(sections, templates) {
-        this.outputType = 'new-reference';
+        this.outputType = 'new-template';
         this.sections = sections;
         this.templates = templates;
     }
