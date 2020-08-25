@@ -832,9 +832,7 @@ function getSectionForDiffLine(diffBody, diffLine) {
     !diffBody.from.sections ||
     !diffBody.to ||
     !diffBody.to.sections ||
-    !diffLine.offset ||
-    !diffLine.offset.from ||
-    !diffLine.offset.to) {
+    !diffLine.offset) {
         return null;
     }
 
@@ -1087,33 +1085,32 @@ function structuredTemplatePromise(text, diff, revision) {
 
                 const innerPdoc = yield ParsoidJS.parse(splitTemplateText, { pdoc: true });
                 const individualTemplates = innerPdoc.filterTemplates();
-                if (individualTemplates === undefined || individualTemplates === null) {
-                    throw new Error('Unexpected result from filterTemplates');
-                }
-                for (var i = 0; i < individualTemplates.length; i++) {
-                    const template = individualTemplates[i];
+                if (individualTemplates !== undefined && individualTemplates !== null) {
+                    for (var i = 0; i < individualTemplates.length; i++) {
+                        const template = individualTemplates[i];
 
-                    if (!needsToParseForAddedTemplates(template.name, false)) {
-                        continue;
-                    }
-
-                    if (template.name === undefined ||
-                    template.name === null ||
-                    template.params === undefined ||
-                    template.params === null) {
-                        continue;
-                    }
-
-                    var dict = {};
-                    dict.name = template.name;
-                    for (var p = 0; p < template.params.length; p++) {
-                        const param = template.params[p].name;
-                        if (param !== undefined && param !== null) {
-                            const value = yield template.get(param).value.toWikitext();
-                            dict[param] = value;
+                        if (!needsToParseForAddedTemplates(template.name, false)) {
+                            continue;
                         }
+
+                        if (template.name === undefined ||
+                            template.name === null ||
+                            template.params === undefined ||
+                            template.params === null) {
+                            continue;
+                        }
+
+                        var dict = {};
+                        dict.name = template.name;
+                        for (var p = 0; p < template.params.length; p++) {
+                            const param = template.params[p].name;
+                            if (param !== undefined && param !== null) {
+                                const value = yield template.get(param).value.toWikitext();
+                                dict[param] = value;
+                            }
+                        }
+                        templateObjects.push(dict);
                     }
-                    templateObjects.push(dict);
                 }
             }
             const result = Object.assign( {
@@ -1479,6 +1476,12 @@ function editCountsAndGroupsPromise(req, cleanedOutput) {
             response.body.query === undefined ||
             response.body.query.users === null ||
             response.body.query.users === undefined) {
+                cleanedOutput.forEach( (outputItem) => {
+                    if (outputItem.outputType !== 'small-change') {
+                        outputItem.userGroups = null;
+                        outputItem.userEditCount = null;
+                    }
+                });
                 return cleanedOutput;
             }
 
@@ -1577,6 +1580,13 @@ class MalformedArticleRevisionResponse extends Error {
     constructor(message) {
         super(message);
         this.name = 'MalformedArticleRevisionResponse';
+    }
+}
+
+class AllArticleDiffCallsFailed extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'AllArticleDiffCallsFailed';
     }
 }
 
@@ -1685,6 +1695,22 @@ function getSignificantEvents(req, res) {
             });
         })
         .then( (response) => {
+
+            // if all articleDiffAndRevisions fail, return error
+            if (response.articleDiffAndRevisions !== undefined &&
+                response.articleDiffAndRevisions !== null) {
+                const articleDiffAndRevisionsNullDiff =
+                    response.articleDiffAndRevisions.filter(diffAndRevision => {
+                    return diffAndRevision.body === undefined || diffAndRevision.body === null;
+                });
+
+                if (articleDiffAndRevisionsNullDiff.length ===
+                    response.articleDiffAndRevisions.length &&
+                    articleDiffAndRevisionsNullDiff.length > 0 &&
+                    response.articleDiffAndRevisions.length > 0) { // all diff calls failed
+                    throw new AllArticleDiffCallsFailed();
+                }
+            }
 
             // STEP 3: All at once gather diffs for uncached talk page revisions
 
@@ -1853,7 +1879,7 @@ function getSignificantEvents(req, res) {
 
                         const nullSnippetTalkPageObject = new NewTalkPageTopicExtended(
                             revision.revid,revision.timestamp, revision.user, revision.userid,
-                            null,null, null, null);
+                            null,null, null, null, null);
                         if (diffAndRevision.body !== undefined && diffAndRevision.body !== null) {
                             const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
                             if (firstDiffLine !== undefined && firstDiffLine !== null) {
@@ -2013,7 +2039,6 @@ function getSignificantEvents(req, res) {
 
             const summary = getSummaryText(req);
 
-            // todo: sometimes nextRvStartId doesn't show at all in response.
             const result = Object.assign({ nextRvStartId: response.nextRvStartId,
                 sha: response.sha,
                 timeline: response.cleanedOutput,
