@@ -591,6 +591,14 @@ const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
         });
 };
 
+function keyTitleForCache(req, title) {
+    var keyTitle = title || req.params.title;
+    const threshold = getThreshold(req);
+    keyTitle = `${threshold}-${keyTitle}`;
+
+    return keyTitle;
+}
+
 function getCachedAndUncachedItems(revisions, req, title) {
 
     // add cache to output and filter out of processing flow
@@ -604,7 +612,7 @@ function getCachedAndUncachedItems(revisions, req, title) {
         });
     }
 
-    const keyTitle = title || req.params.title;
+    const keyTitle = keyTitleForCache(req, title);
     for (var i = 0; i < revisions.length; i++) {
         const revision = revisions[i];
         const domainDict = significantChangesCache[req.params.domain];
@@ -646,7 +654,7 @@ function calculateCacheForTitleIsMaxedOut(titleDict) {
 }
 
 function cacheForTitleIsMaxedOut(req, title) {
-    const keyTitle = title || req.params.title;
+    const keyTitle = keyTitleForCache(req, title);
     var domainDict = significantChangesCache[req.params.domain];
     if (domainDict) {
         var titleDict = domainDict[keyTitle];
@@ -662,7 +670,7 @@ function cacheForTitleIsMaxedOut(req, title) {
 
 function latestAndEarliestCachedRevisionTimestamp(req, title) {
     var domainDict = significantChangesCache[req.params.domain];
-    const keyTitle = title || req.params.title;
+    const keyTitle = keyTitleForCache(req, title);
     if (domainDict) {
         var titleDict = domainDict[keyTitle];
         if (titleDict) {
@@ -693,7 +701,7 @@ function latestAndEarliestCachedRevisionTimestamp(req, title) {
 
 function setSignificantChangesCache(req, title, item) {
     var domainDict = significantChangesCache[req.params.domain];
-    const keyTitle = title || req.params.title;
+    const keyTitle = keyTitleForCache(req, title);
     if (domainDict) {
         var titleDict = domainDict[keyTitle];
         if (titleDict) {
@@ -719,7 +727,7 @@ function cleanupCache(req) {
 
     // cleanup article cache
     var domainDict = significantChangesCache[req.params.domain];
-    const articleTitle = req.params.title;
+    const articleTitle = keyTitleForCache(req, null);
         if (domainDict) {
         var titleDict = domainDict[articleTitle];
         if (titleDict) {
@@ -774,8 +782,9 @@ function cleanupCache(req) {
 
                     // clean out from talk page cache
                     // todo: why on earth do we get a talkPageTitle is not a function error here?
-                    var talkPageTitle = `Talk:${req.params.title}`; // talkPageTitle(req);
-                    var talkPageTitleDict = domainDict[talkPageTitle];
+                    var talkPageTitle = `Talk:${req.params.title}`;
+                    const keyTalkPageTitle = keyTitleForCache(req, talkPageTitle);
+                    var talkPageTitleDict = domainDict[keyTalkPageTitle];
                     if (talkPageTitleDict) {
                         // eslint-disable-next-line no-restricted-properties
                         var talkPageTitleArray = Object.values(talkPageTitleDict);
@@ -807,7 +816,7 @@ function cleanupCache(req) {
 
 function getSummaryText(req) {
     var domainDict = significantChangesCache[req.params.domain];
-    const articleTitle = req.params.title;
+    const articleTitle = keyTitleForCache(req, null);
     if (domainDict) {
         var titleDict = domainDict[articleTitle];
         if (titleDict) {
