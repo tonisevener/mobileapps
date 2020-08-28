@@ -1964,7 +1964,7 @@ function getSignificantEvents(req, res) {
                                 sections.push(section);
                             }
                             if (templates) {
-                                combinedTemplates.push(templates);
+                                combinedTemplates = combinedTemplates.concat(templates);
                             }
                         }
 
