@@ -31,7 +31,7 @@ paths:
           response:
             status: 200
             headers:
-              content-type: application/json; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Summary/1.4.2"
+              content-type: application/json; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Summary/1.5.0"
               content-language: en
               vary: /.+/
               etag: /^"[^/"]+/[^/"]+"$/
@@ -81,14 +81,6 @@ paths:
                   revisions: /.+/
                   edit: /.+/
                   talk: /.+/
-              api_urls:
-                summary: /.+/
-              # mobile_html: /.+/
-                metadata: /.+/
-                references: /.+/
-                media: /.+/
-                edit_html: /.+/
-                talk_page_html: /.+/
               extract: /.+/
               extract_html: /.+/
 
@@ -128,7 +120,7 @@ components:
           schema:
             type: string
       content:
-        'application/json; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Summary/1.4.2"':
+        'application/json; charset=utf-8; profile="https://www.mediawiki.org/wiki/Specs/Summary/1.5.0"':
           schema:
             $ref: '#/components/schemas/summary'
   schemas:
@@ -217,8 +209,6 @@ components:
               $ref: '#/components/schemas/content_urls'
             mobile:
               $ref: '#/components/schemas/content_urls'
-        api_urls:
-          $ref: '#/components/schemas/api_urls'
         coordinates:
           type: object
           description: The coordinates of the item
@@ -241,7 +231,6 @@ components:
         - revision
         - timestamp
         - content_urls
-        - api_urls
         - extract
         - extract_html
 
@@ -264,34 +253,4 @@ components:
         - page
         - revisions
         - edit
-      additionalProperties: false
-
-    api_urls:
-      deprecated: true
-      type: object
-      properties:
-        summary:
-          type: string
-          description: the REST API summary URL for the page
-        metadata:
-          type: string
-          description: the REST API URL for the page metadata (not yet active)
-        references:
-          type: string
-          description: the REST API URL for the references on the page (not yet active)
-        media:
-          type: string
-          description: the REST API URL for the media included in the page (not yet active)
-        edit_html:
-          type: string
-          description: the REST API URL for the raw Parsoid HTML for the page
-        talk_page_html:
-          type: string
-          description: the REST API URL for the raw Parsoid HTML for the talk page for this page (if applicable)
-      required:
-        - summary
-        - metadata
-        - references
-        - media
-        - edit_html
       additionalProperties: false

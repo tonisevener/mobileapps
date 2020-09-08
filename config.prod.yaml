@@ -75,7 +75,7 @@ services:
       # the list of incoming request headers that can be logged; if left empty,
       # the following headers are allowed: cache-control, content-length,
       # content-type, if-match, user-agent, x-request-id
-      # log_header_whitelist:
+      # log_header_allowlist:
       #   - cache-control
       #   - content-length
       #   - content-type
@@ -107,6 +107,14 @@ services:
         headers: '{{request.headers}}'
         body: '{{request.body}}'
         timeout: 60000 # 60 * 1000
+      # the template used for requesting ResourceLoader module content from load.php
+      mw_resource_loader_req:
+        method: post
+        uri: http://appservers-rw.discovery.wmnet/w/load.php
+        headers:
+          host: '{{request.params.domain}}'
+          user-agent: '{{user-agent}}'
+        body: '{{ default(request.query, {}) }}'
       # the template used for contacting RESTBase
       restbase_req:
         method: '{{request.method}}'
