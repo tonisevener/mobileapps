@@ -1263,16 +1263,6 @@ function addStructuredTemplates(diffAndRevisions) {
                             }
                                 break;
                             case 1: // Deleted
-                                // if there's a space before deleted text, include it
-                                // so it gets picked up in inBetweenText check up there
-                                // const textBeforeDeleted = binaryText.substring(range.start - 1,
-                                //     (range.start - 1) + 1);
-                                // if (textBeforeDeleted === ' ') {
-                                //     previousRangeEndIndex = range.start - 1;
-                                // } else {
-                                //     previousRangeEndIndex = range.start + range.length;
-                                // }
-
                                 previousRangeEndIndex = range.start + range.length;
 
                         }
@@ -1355,10 +1345,7 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
         return null;
     }
 
-     const newSectionTalkPageDiffAndRevisions = [];
-    // const talkPage = talkPageBody.query.pages;
-    // const talkPageObject = talkPage[Object.keys(talkPage)[0]];
-    // const talkPageRevisions = talkPageObject.revisions;
+    const newSectionTalkPageDiffAndRevisions = [];
     for (var index = 0; index < talkDiffAndRevisions.length; index++) {
         const diffAndRevision = talkDiffAndRevisions[index];
 
