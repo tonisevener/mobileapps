@@ -10,7 +10,6 @@ const encoding = require('@root/encoding');
 const ParsoidJS = require('parsoid-jsapi');
 const PRFunPromise = require('prfun');
 const tUtil = require('../../lib/talk/TalkPageTopicUtilities');
-const Snippet = require('../../lib/snippet/Snippet');
 const NodeType = require('../../lib/nodeType');
 let app;
 
@@ -2192,11 +2191,7 @@ function getSignificantEvents(req, res) {
 }
 
 router.get('/page/significant-events/:title', (req, res) => {
-    // res.status(200);
     return getSignificantEvents(req, res);
-    // const result = Object.assign({ result: "What up new endpoint."});
-    // mUtil.setContentType(res, mUtil.CONTENT_TYPES.talk);
-    // res.json(result).end();
 });
 
 module.exports = function(appObj) {
