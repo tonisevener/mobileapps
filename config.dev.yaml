@@ -64,7 +64,7 @@ services:
       # the list of incoming request headers that can be logged; if left empty,
       # the following headers are allowed: cache-control, content-length,
       # content-type, if-match, user-agent, x-request-id
-      # log_header_whitelist:
+      # log_header_allowlist:
       #   - cache-control
       #   - content-length
       #   - content-type
@@ -86,6 +86,13 @@ services:
         headers:
           user-agent: '{{user-agent}}'
           accept-language: '{{accept-language}}'
+        body: '{{ default(request.query, {}) }}'
+      # the template used for requesting ResourceLoader module content from load.php
+      mw_resource_loader_req:
+        method: post
+        uri: https://{{domain}}/w/load.php
+        headers:
+          user-agent: '{{user-agent}}'
         body: '{{ default(request.query, {}) }}'
       # the template used for contacting RESTBase
       restbase_req:

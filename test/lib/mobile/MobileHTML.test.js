@@ -44,10 +44,10 @@ describe('lib:MobileHTML', () => {
       });
       it('detects inline background styles', () => {
         assert(constants.inlineBackgroundStyleRegex.test('width: 100px; background: #fff; height:50px;'));
-        assert(constants.inlineBackgroundStyleRegex.test('background-color: transparent; height:50px;'));
         assert(constants.inlineBackgroundStyleRegex.test('background-color: blue'));
         assert(constants.inlineBackgroundStyleRegex.test('background-color: unset'));
         assert(constants.inlineBackgroundStyleRegex.test('width: 50px; background-color: #3366ff'));
+        assert(!constants.inlineBackgroundStyleRegex.test('background-color: transparent; height:50px;'));
         assert(!constants.inlineBackgroundStyleRegex.test('width: 100px; height:50px;'));
         assert(!constants.inlineBackgroundStyleRegex.test('color: #3366ff; height:50px;'));
         assert(!constants.inlineBackgroundStyleRegex.test('color: inherit'));
@@ -108,6 +108,9 @@ describe('lib:MobileHTML', () => {
         assert(constants.forbiddenElementIDRegex.test('coordinates'));
         assert(!constants.forbiddenElementIDRegex.test('notcoordinates'));
         assert(!constants.forbiddenElementIDRegex.test('COORDINATES'));
+      });
+      it('detects style overriding classes', () => {
+        assert(constants.styleOverridingClasses.test('whitebg'));
       });
       it('was worth it to write these regexes', () => {
         const doc = fixtures.readIntoDocument('United_States.html');
