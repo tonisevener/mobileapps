@@ -566,12 +566,12 @@ const diffAndRevisionPromises = (req, revisions) => {
     });
 };
 
-function talkPageTitle(req) {
+function getTalkPageTitle(req) {
     return `Talk:${req.params.title}`;
 }
 
 const talkPageRevisionsPromise = (req, rvStart, rvEnd) => {
-    return mwapi.queryForRevisions(req, talkPageTitle(req), 100, rvStart, rvEnd )
+    return mwapi.queryForRevisions(req, getTalkPageTitle(req), 100, rvStart, rvEnd )
         .catch(e => {
             return null;
         });
@@ -710,7 +710,6 @@ function setSignificantChangesCache(req, title, item) {
 }
 
 function cleanupCache(req) {
-
     // cleanup article cache
     var domainDict = significantChangesCache[req.params.domain];
     const articleTitle = keyTitleForCache(req, null);
@@ -767,8 +766,7 @@ function cleanupCache(req) {
                     }
 
                     // clean out from talk page cache
-                    // todo: why on earth do we get a talkPageTitle is not a function error here?
-                    var talkPageTitle = `Talk:${req.params.title}`;
+                    var talkPageTitle = getTalkPageTitle(req);
                     const keyTalkPageTitle = keyTitleForCache(req, talkPageTitle);
                     var talkPageTitleDict = domainDict[keyTalkPageTitle];
                     if (talkPageTitleDict) {
@@ -1661,7 +1659,7 @@ function shaFromSortedOutput(req, sortedOutput) {
         }
 
         if (output.outputType === 'new-talk-page-topic') {
-            shaTitle = talkPageTitle(req);
+            shaTitle = getTalkPageTitle(req);
             shaRevID = output.revid;
             break;
         }
@@ -1849,7 +1847,7 @@ function getSignificantEvents(req, res) {
                 response.talkPageRevisions.body.query.pages[0].revisions !== null) {
                 const talkPageRevisions = response.talkPageRevisions.body.query.pages[0].revisions;
                 const talkPageEvalResults = getCachedAndUncachedItems(talkPageRevisions,
-                    req, talkPageTitle(req));
+                    req, getTalkPageTitle(req));
 
                 // save cached talk page revisions to finalOutput
                 const finalOutput = response.finalOutput.concat(talkPageEvalResults.cachedOutput);
@@ -2136,7 +2134,7 @@ function getSignificantEvents(req, res) {
                         response.finalOutput.push(item);
                         var cacheKey;
                         if (item.outputType === 'new-talk-page-topic') {
-                            const title = talkPageTitle(req);
+                            const title = getTalkPageTitle(req);
                             setSignificantChangesCache(req, title, item);
                         } else {
                             setSignificantChangesCache(req, null, item);
