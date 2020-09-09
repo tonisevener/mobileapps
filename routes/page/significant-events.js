@@ -75,7 +75,7 @@ class CharacterChange {
     }
 }
 
-class SmallOutput {
+class SmallOutputExtended {
     constructor(revid, timestamp, user, userid) {
         this.revid = revid;
         this.timestamp = timestamp;
@@ -85,9 +85,10 @@ class SmallOutput {
     }
 }
 
-class ConsolidatedSmallOutput {
-    constructor(count) {
-        this.count = count;
+class SmallOutput {
+    constructor(smallOutputExtended) {
+        this.revid = smallOutputExtended.revid;
+        this.timestamp = smallOutputExtended.timestamp;
         this.outputType = 'small-change';
     }
 }
@@ -1510,10 +1511,9 @@ function cleanOutput(output) {
         return null;
     }
 
-    // collapses small changes, converts large changes only to info needed
+    // convert large and small changes only to info needed
 
     const cleanedOutput = [];
-    let numSmallChanges = 0;
     for (var i = 0; i < output.length; i++) {
         const item = output[i];
 
@@ -1522,30 +1522,15 @@ function cleanOutput(output) {
             continue;
         }
 
-        if (item.outputType === 'small-change') {
-            numSmallChanges++;
-            continue;
+        if (item.outputType === 'large-change') {
+            cleanedOutput.push(new LargeOutput(item));
+        } else if (item.outputType === 'new-talk-page-topic') {
+            cleanedOutput.push(new NewTalkPageTopic(item));
+        } else if (item.outputType === 'small-change') {
+            cleanedOutput.push(new SmallOutput(item));
         } else {
-            if (numSmallChanges > 0) {
-                const change = new ConsolidatedSmallOutput(numSmallChanges);
-                cleanedOutput.push(change);
-                numSmallChanges = 0;
-            }
-
-            if (item.outputType === 'large-change') {
-                cleanedOutput.push(new LargeOutput(item));
-            } else if (item.outputType === 'new-talk-page-topic') {
-                cleanedOutput.push(new NewTalkPageTopic(item));
-            } else {
-                cleanedOutput.push(item);
-            }
+            cleanedOutput.push(item);
         }
-    }
-
-    if (numSmallChanges > 0) {
-        const change = new ConsolidatedSmallOutput(numSmallChanges);
-        cleanedOutput.push(change);
-        numSmallChanges = 0;
     }
 
     return cleanedOutput;
@@ -1893,7 +1878,7 @@ function getSignificantEvents(req, res) {
 
                 // edge case in case one of the diff endpoints fail...fallback to small type
                 if (diffAndRevision.body === undefined || diffAndRevision.body === null) {
-                    const smallOutputObject = new SmallOutput(revision.revid,
+                    const smallOutputObject = new SmallOutputExtended(revision.revid,
                         revision.timestamp, revision.user, revision.userid);
                     uncachedOutput.push(smallOutputObject);
                     continue;
@@ -1975,7 +1960,7 @@ function getSignificantEvents(req, res) {
                             revision.timestamp, revision.user, revision.userid, significantChanges);
                         uncachedOutput.push(largeOutputObject);
                     } else {
-                        const smallOutputObject = new SmallOutput(revision.revid,
+                        const smallOutputObject = new SmallOutputExtended(revision.revid,
                             revision.timestamp, revision.user, revision.userid);
                         uncachedOutput.push(smallOutputObject);
                     }
