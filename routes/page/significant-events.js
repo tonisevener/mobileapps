@@ -686,27 +686,13 @@ function latestAndEarliestCachedRevisionTimestamp(req, title) {
 }
 
 function setSignificantChangesCache(req, title, item) {
-    var domainDict = significantChangesCache[req.params.domain];
     const keyTitle = keyTitleForCache(req, title);
-    if (domainDict) {
-        var titleDict = domainDict[keyTitle];
-        if (titleDict) {
-            titleDict[item.revid] = item;
-            titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
-        } else {
-            titleDict = {};
-            titleDict[item.revid] = item;
-            titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
-            domainDict[keyTitle] = titleDict;
-        }
-    } else {
-        titleDict = {};
-        titleDict[item.revid] = item;
-        titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
-        domainDict = {};
-        domainDict[keyTitle] = titleDict;
-        significantChangesCache[req.params.domain] = domainDict;
-    }
+    var domainDict = significantChangesCache[req.params.domain] || {};
+    var titleDict = domainDict[keyTitle] || {};
+    titleDict[item.revid] = item;
+    titleDict.maxedOut = calculateCacheForTitleIsMaxedOut(titleDict);
+    domainDict[keyTitle] = titleDict;
+    significantChangesCache[req.params.domain] = domainDict;
 }
 
 function cleanupCache(req) {
