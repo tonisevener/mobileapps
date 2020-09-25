@@ -920,7 +920,8 @@ function getSectionForDiffLine(diffBody, diffLine) {
         }
     }
 
-    if (diffLine.offset.to) {
+    if (diffLine.offset.to || diffLine.offset.to === 0) {
+        // 0 is a valid value, but without explicit check JS sees it as invalid
         return toSection;
     } else {
         return fromSection;
