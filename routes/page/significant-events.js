@@ -1063,7 +1063,10 @@ function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 
         if ((text.includes(`{{${name}`) && includeOpeningBraces) || (text.includes(`${name}`) &&
             !includeOpeningBraces)) {
-            return true;
+
+            if (!text.includes('citation needed')) {
+                return true;
+            }
         }
     }
 
