@@ -1352,9 +1352,10 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
         if (diffAndRevision.revision.comment.toLowerCase().includes('new section')
             && !diffAndRevision.revision.comment.toLowerCase()
                 .includes('semi-protected edit request') // don't show semi-protected edit requests
-            && diffAndRevision.revision.userid !== 4936590) { // don't show signbot topics
+            && diffAndRevision.revision.userid !== 4936590 // don't show signbot topics
+            && !diffAndRevision.revision.tags.includes('mw-reverted')) { // don't show mw-reverted posts
             // see if this section was reverted in previous iterations
-            var wasReverted = false;
+            var wasUndoneOrRolledBackLater = false;
             if (index - 1 > 0) {
                 var nextDiffAndRevision = talkDiffAndRevisions[index - 1];
                 if (nextDiffAndRevision.revision.userid === 4936590) { // signbot,
@@ -1365,10 +1366,10 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
                 }
                 if (nextDiffAndRevision.revision.tags.includes('mw-undo') ||
                     nextDiffAndRevision.revision.tags.includes('mw-rollback')) {
-                    wasReverted = true;
+                    wasUndoneOrRolledBackLater = true;
                 }
             }
-            if (wasReverted === false) {
+            if (wasUndoneOrRolledBackLater === false) {
                 newSectionTalkPageDiffAndRevisions.push(diffAndRevision);
             }
         }
@@ -1442,7 +1443,7 @@ function getLargestDiffLineOfAdded(diffBody) {
     return null;
 }
 
-function textContainsEmptyLineOrSection(text) {
+function textContainsEmptyLineOrSectionOrTemplate(text) {
 
     if (text === null ||
     text === undefined) {
@@ -1450,7 +1451,7 @@ function textContainsEmptyLineOrSection(text) {
     }
 
     const trimmedText = text.trim();
-    return (trimmedText.length === 0 || text.includes('=='));
+    return (trimmedText.length === 0 || text.includes('==') || text.includes('{{'));
 }
 
 function getFirstDiffLineWithContent(diffBody) {
@@ -1476,7 +1477,7 @@ function getFirstDiffLineWithContent(diffBody) {
             case 0: // Context line type
                 continue;
             default:
-                if (textContainsEmptyLineOrSection(diff.text)) {
+                if (textContainsEmptyLineOrSectionOrTemplate(diff.text)) {
                     continue;
                 } else {
                     return diff;
