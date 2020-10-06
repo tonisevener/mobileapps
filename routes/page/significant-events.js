@@ -1443,15 +1443,24 @@ function getLargestDiffLineOfAdded(diffBody) {
     return null;
 }
 
-function textContainsEmptyLineOrSectionOrTemplate(text) {
+function textContainsEmptyLineOrSection(text) {
+    if (text === null ||
+        text === undefined) {
+        return false;
+    }
+
+    const trimmedText = text.trim();
+    return (trimmedText.length === 0 || text.includes('=='));
+}
+
+function textContainsTemplate(text) {
 
     if (text === null ||
     text === undefined) {
         return false;
     }
 
-    const trimmedText = text.trim();
-    return (trimmedText.length === 0 || text.includes('==') || text.includes('{{'));
+    return text.includes('{{');
 }
 
 function getFirstDiffLineWithContent(diffBody) {
@@ -1463,29 +1472,27 @@ function getFirstDiffLineWithContent(diffBody) {
         return null;
     }
 
-    for (let i = 0; i < diffBody.diff.length; i++) {
-        const diff = diffBody.diff[i];
+    const nonContextDiffLines = diffBody.diff.filter(diff => (diff.type !== null &&
+        diff.type !== undefined && diff.text !== null && diff.text !== undefined
+        && diff.type > 0));
+    const nonContextDiffLinesWithoutEmptyLineOrSectionsOrTemplates =
+        nonContextDiffLines.filter(diff =>
+            !textContainsEmptyLineOrSection(diff.text) && !textContainsTemplate(diff.text));
+    const nonContextDiffLinesWithoutEmptyLineOrSections =
+        nonContextDiffLines.filter(diff => !textContainsEmptyLineOrSection(diff.text));
 
-        if (diff.type === null ||
-        diff.type === undefined ||
-            diff.text === null ||
-            diff.text === undefined) {
-            continue;
-        }
-
-        switch (diff.type) {
-            case 0: // Context line type
-                continue;
-            default:
-                if (textContainsEmptyLineOrSectionOrTemplate(diff.text)) {
-                    continue;
-                } else {
-                    return diff;
-                }
-        }
+    if (nonContextDiffLines.length === 0) {
+        return null;
     }
 
-    return null;
+    // prefer to return a line without templates, otherwise try line with templates
+    if (nonContextDiffLinesWithoutEmptyLineOrSectionsOrTemplates.length > 0) {
+        return nonContextDiffLinesWithoutEmptyLineOrSectionsOrTemplates[0];
+    } else if (nonContextDiffLinesWithoutEmptyLineOrSections.length > 0) {
+        return nonContextDiffLinesWithoutEmptyLineOrSections[0];
+    } else {
+        return null;
+    }
 }
 
 function sortOutput(output) {
