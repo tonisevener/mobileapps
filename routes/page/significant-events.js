@@ -76,8 +76,9 @@ class CharacterChange {
 }
 
 class SmallOutputExtended {
-    constructor(revid, timestamp, user, userid) {
+    constructor(revid, parentid, timestamp, user, userid) {
         this.revid = revid;
+        this.parentid = parentid;
         this.timestamp = timestamp;
         this.outputType = 'small-change';
         this.user = user;
@@ -88,14 +89,16 @@ class SmallOutputExtended {
 class SmallOutput {
     constructor(smallOutputExtended) {
         this.revid = smallOutputExtended.revid;
+        this.parentid = smallOutputExtended.parentid;
         this.timestamp = smallOutputExtended.timestamp;
         this.outputType = 'small-change';
     }
 }
 
 class VandalismOutput {
-    constructor(revid, timestamp, user, userid, sections) {
+    constructor(revid, parentid, timestamp, user, userid, sections) {
         this.revid = revid;
+        this.parentid = parentid;
         this.timestamp = timestamp;
         this.outputType = 'vandalism-revert';
         this.user = user;
@@ -144,6 +147,7 @@ class DeletedTextOutput {
 class LargeOutput {
     constructor(largeOutputExpanded) {
         this.revid = largeOutputExpanded.revid;
+        this.parentid = largeOutputExpanded.parentid;
         this.timestamp = largeOutputExpanded.timestamp;
         this.outputType = 'large-change';
         this.user = largeOutputExpanded.user;
@@ -153,8 +157,9 @@ class LargeOutput {
 }
 
 class LargeOutputExpanded {
-    constructor(revid, timestamp, user, userid, significantChanges) {
+    constructor(revid, parentid, timestamp, user, userid, significantChanges) {
         this.revid = revid;
+        this.parentid = parentid;
         this.timestamp = timestamp;
         this.outputType = 'large-change';
         this.user = user;
@@ -164,9 +169,10 @@ class LargeOutputExpanded {
 }
 
 class NewTalkPageTopicExtended {
-    constructor(revid, timestamp, user, userid, snippet, type, highlightRanges, characterChange,
-                section) {
+    constructor(revid, parentid, timestamp, user, userid, snippet, type, highlightRanges,
+                characterChange, section) {
         this.revid = revid;
+        this.parentid = parentid;
         this.timestamp = timestamp;
         this.outputType = 'new-talk-page-topic';
         this.snippet = snippet;
@@ -182,6 +188,7 @@ class NewTalkPageTopicExtended {
 class NewTalkPageTopic {
     constructor(newTalkPageTopicExpanded) {
         this.revid = newTalkPageTopicExpanded.revid;
+        this.parentid = newTalkPageTopicExpanded.parentid;
         this.timestamp = newTalkPageTopicExpanded.timestamp;
         this.outputType = 'new-talk-page-topic';
         this.snippet = newTalkPageTopicExpanded.snippet;
@@ -1891,7 +1898,7 @@ function getSignificantEvents(req, res) {
                 // edge case in case one of the diff endpoints fail...fallback to small type
                 if (diffAndRevision.body === undefined || diffAndRevision.body === null) {
                     const smallOutputObject = new SmallOutputExtended(revision.revid,
-                        revision.timestamp, revision.user, revision.userid);
+                        revision.parentid, revision.timestamp, revision.user, revision.userid);
                     uncachedOutput.push(smallOutputObject);
                     continue;
                 }
@@ -1908,7 +1915,7 @@ function getSignificantEvents(req, res) {
                         diffLine));
                     const dedupedSections = new Set(sections);
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
-                        revision.timestamp, revision.user, revision.userid,
+                        revision.parentid, revision.timestamp, revision.user, revision.userid,
                         Array.from(dedupedSections));
                     uncachedOutput.push(vandalismRevertOutputObject);
                 } else {
@@ -1969,11 +1976,13 @@ function getSignificantEvents(req, res) {
 
                     if (significantChanges.length > 0) {
                         const largeOutputObject = new LargeOutputExpanded(revision.revid,
-                            revision.timestamp, revision.user, revision.userid, significantChanges);
+                            revision.parentid, revision.timestamp, revision.user,
+                            revision.userid, significantChanges);
                         uncachedOutput.push(largeOutputObject);
                     } else {
                         const smallOutputObject = new SmallOutputExtended(revision.revid,
-                            revision.timestamp, revision.user, revision.userid);
+                            revision.parentid, revision.timestamp, revision.user,
+                            revision.userid);
                         uncachedOutput.push(smallOutputObject);
                     }
                 }
@@ -1989,15 +1998,17 @@ function getSignificantEvents(req, res) {
                         const revision = diffAndRevision.revision;
 
                         const nullSnippetTalkPageObject = new NewTalkPageTopicExtended(
-                            revision.revid,revision.timestamp, revision.user, revision.userid,
-                            null,null, null, null, null);
+                            revision.revid, revision.parentid, revision.timestamp,
+                            revision.user, revision.userid,null,null,
+                            null, null, null);
                         if (diffAndRevision.body !== undefined && diffAndRevision.body !== null) {
                             const firstDiffLine = getFirstDiffLineWithContent(diffAndRevision.body);
                             if (firstDiffLine !== undefined && firstDiffLine !== null) {
                                 const section = getSectionForDiffLine(diffAndRevision.body,
                                     firstDiffLine);
                                 const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
-                                    revision.revid,revision.timestamp, revision.user,
+                                    revision.revid, revision.parentid,
+                                    revision.timestamp, revision.user,
                                     revision.userid,
                                     firstDiffLine.text,firstDiffLine.type,
                                     firstDiffLine.highlightRanges,
@@ -2008,7 +2019,8 @@ function getSignificantEvents(req, res) {
                             }
                         } else {
                             const newTalkPageTopicOutputObject = new NewTalkPageTopicExtended(
-                                revision.revid,revision.timestamp, revision.user, revision.userid,
+                                revision.revid, revision.parentid,
+                                revision.timestamp, revision.user, revision.userid,
                                 null,null, null, null);
                             uncachedOutput.push(nullSnippetTalkPageObject);
                         }
