@@ -859,6 +859,16 @@ function getSectionForDiffLine(diffBody, diffLine) {
         return null;
     }
 
+    // capture edge case where changes occur and all sections are erased
+    if ((diffLine.offset.to === null &&
+        diffLine.offset.from !== null &&
+        diffBody.from.sections.length === 0) ||
+        (diffLine.offset.from === null &&
+            diffLine.offset.to !== null &&
+            diffBody.to.sections.length === 0)) {
+        return null;
+    }
+
     // diffLine.offset.from = 0 is still valid if it's at the very beginning of the article.
     // In this case javascript evaluates diffLine.offset.from to false,
     // hence the need for the separate check.
@@ -1180,6 +1190,19 @@ function addStructuredTemplates(diffAndRevisions) {
             diffAndRevision.revision === null ||
             diffAndRevision.revision === undefined) {
             continue;
+        }
+
+        const addedLinesCount = diffAndRevision.body.diff.filter(diffItem => diffItem.type === 1)
+            .length;
+        if (addedLinesCount > 500) {
+            // This suggests some sort of mass change that would be too much work on the server
+            // to parse for templates.
+            // bypassing template detection in this case.
+            // this may be a good metric to tweak to boost performance
+            return Promise.all(promises)
+                .then( (response) => {
+                    return diffAndRevisions;
+                });
         }
 
         for (var d = 0; d < diffAndRevision.body.diff.length; d++) {
@@ -1730,13 +1753,14 @@ function getSignificantEvents(req, res) {
             if (isMaxedOut && cutoff && cutoff.earliestTimestamp) {
                 filteredRevisions = revisions.filter((revision) => {
                     if (revision.timestamp === undefined || revision.timestamp === null ||
-                    cutoff.earliestTimestamp === undefined || cutoff.earliestTimestamp === null) {
+                        cutoff.earliestTimestamp === undefined ||
+                        cutoff.earliestTimestamp === null) {
                         return 0;
                     }
                     return new Date(revision.timestamp) > new Date(cutoff.earliestTimestamp);
                 });
             } else {
-                filteredRevisions = revisions;
+                   filteredRevisions = revisions;
             }
 
             // if cache is maxed out and filteredRevisions contains
@@ -2166,12 +2190,93 @@ function getSignificantEvents(req, res) {
                 sha: response.sha,
                 timeline: response.cleanedOutput,
                 summary: summary });
-            res.send(result).end();
+            return result;
         });
 }
 
 router.get('/page/significant-events/:title', (req, res) => {
-    return getSignificantEvents(req, res);
+    return getSignificantEvents(req, res).then( (response) => {
+        res.send(response).end();
+    });
+});
+
+const overallCountsCache = {};
+
+function getCounts(req, res) {
+    return getSignificantEvents(req, res).then( (response) => {
+
+        const snippetableEvents = response.timeline.filter(event => event.outputType === 'large-change');
+        const smallEventsCount = response.timeline.filter(event => event.outputType === 'small-change').length;
+        const snippetableEventsCount = snippetableEvents.length;
+        const newTalkPageTopicCount = response.timeline
+            .filter(event => event.outputType === 'new-talk-page-topic').length;
+        const vandalismRevertCount = response.timeline
+            .filter(event => event.outputType === 'vandalism-revert').length;
+        const flatMappedSignificantChanges = snippetableEvents
+            .reduce((acc, x) => acc.concat(x.significantChanges), []);
+        const addedTextCount = flatMappedSignificantChanges
+            .filter(significantChange => significantChange.outputType === 'added-text').length;
+        const deletedTextCount = flatMappedSignificantChanges
+            .filter(significantChange => significantChange.outputType === 'deleted-text').length;
+        const newReferenceCount = flatMappedSignificantChanges
+            .filter(significantChange => significantChange.outputType === 'new-template').length;
+        const significantEventCount = snippetableEventsCount +
+            newTalkPageTopicCount +
+            vandalismRevertCount;
+
+        const countsCache = overallCountsCache[req.params.title] || {};
+        countsCache.smallEventsCount = !countsCache.smallEventsCount ?
+            smallEventsCount : countsCache.smallEventsCount + smallEventsCount;
+        countsCache.addedTextCount = !countsCache.addedTextCount ?
+            addedTextCount : countsCache.addedTextCount + addedTextCount;
+        countsCache.deletedTextCount = !countsCache.deletedTextCount ?
+            deletedTextCount : countsCache.deletedTextCount + deletedTextCount;
+        countsCache.newReferenceCount = !countsCache.newReferenceCount ?
+            newReferenceCount : countsCache.newReferenceCount + newReferenceCount;
+        countsCache.snippetableEventsCount = !countsCache.snippetableEventsCount ?
+            snippetableEventsCount : countsCache.snippetableEventsCount + snippetableEventsCount;
+        countsCache.newTalkPageTopicCount = !countsCache.newTalkPageTopicCount ?
+            newTalkPageTopicCount : countsCache.newTalkPageTopicCount + newTalkPageTopicCount;
+        countsCache.vandalismRevertCount = !countsCache.vandalismRevertCount ?
+            vandalismRevertCount : countsCache.vandalismRevertCount + vandalismRevertCount;
+        countsCache.significantEventCount = !countsCache.significantEventCount ?
+            significantEventCount : countsCache.significantEventCount + significantEventCount;
+
+        overallCountsCache[req.params.title] = countsCache;
+
+        if (!response.nextRvStartId) {
+            return false;
+        }
+
+        req.query.rvstartid = response.nextRvStartId;
+        return getCounts(req, res);
+    });
+}
+
+const countsTitles = ['Amy_Coney_Barrett', 'Bible'];
+var currentCountsIndex = 0;
+
+function parentGetCounts(req, res) {
+    if (currentCountsIndex === countsTitles.length) {
+        return overallCountsCache;
+    }
+
+    const title = countsTitles[currentCountsIndex];
+    req.query.rvstartid = undefined;
+    req.params.title = title;
+    return getCounts(req, res)
+        .then( (response) => {
+            if (response === false) {
+                currentCountsIndex++;
+                return parentGetCounts(req, res);
+            }
+        });
+}
+
+router.get('/page/significant-events-counts/:title', (req, res) => {
+    return parentGetCounts(req, res).then( (response) => {
+        res.send(response).end();
+    });
 });
 
 module.exports = function(appObj) {
