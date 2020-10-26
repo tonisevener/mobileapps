@@ -1189,10 +1189,7 @@ function addStructuredTemplates(diffAndRevisions) {
             // to parse for templates.
             // bypassing template detection in this case.
             // this may be a good metric to tweak to boost performance
-            return Promise.all(promises)
-                .then( (response) => {
-                    return diffAndRevisions;
-                });
+            continue;
         }
 
         for (var d = 0; d < diffAndRevision.body.diff.length; d++) {
@@ -1919,14 +1916,12 @@ function getSignificantEvents(req, res) {
 
                 if (revision.tags !== undefined && revision.tags !== null &&
                     revision.tags.includes('mw-rollback') &&
-                    revision.comment !== undefined || revision.comment !== null &&
-                    revision.comment.toLowerCase().includes('revert') &&
-                    revision.comment.toLowerCase().includes('vandalism') &&
+                    (revision.comment !== undefined && revision.comment !== null) &&
+                    (revision.comment.toLowerCase().includes('revert') ||
+                    revision.comment.toLowerCase().includes('vandalism')) &&
                     diffAndRevision.body !== null && diffAndRevision.body !== undefined) {
-                    const allChangedDiffLines = getAllChangedDiffLines(diffAndRevision.body);
-                    const sections = allChangedDiffLines.map(diffLine =>
-                        getSectionForDiffLine(diffAndRevision.body,
-                        diffLine));
+                    const sections = diffAndRevision.characterChangeWithSections.addedSections
+                        .concat(diffAndRevision.characterChangeWithSections.deletedSections);
                     const dedupedSections = new Set(sections);
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
                         revision.parentid, revision.timestamp, revision.user, revision.userid,
