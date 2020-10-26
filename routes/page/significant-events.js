@@ -859,16 +859,6 @@ function getSectionForDiffLine(diffBody, diffLine) {
         return null;
     }
 
-    // capture edge case where changes occur and all sections are erased
-    if ((diffLine.offset.to === null &&
-        diffLine.offset.from !== null &&
-        diffBody.from.sections.length === 0) ||
-        (diffLine.offset.from === null &&
-            diffLine.offset.to !== null &&
-            diffBody.to.sections.length === 0)) {
-        return null;
-    }
-
     // diffLine.offset.from = 0 is still valid if it's at the very beginning of the article.
     // In this case javascript evaluates diffLine.offset.from to false,
     // hence the need for the separate check.
@@ -907,7 +897,7 @@ function getSectionForDiffLine(diffBody, diffLine) {
             prevSection = section;
         }
 
-        if (!fromSection && diffLine.offset.from > 0) {
+        if (!fromSection && diffLine.offset.from > 0 && diffBody.from.sections.length > 0) {
             if (prevSection.heading) {
                 fromSection = prevSection.heading;
             }
@@ -930,7 +920,7 @@ function getSectionForDiffLine(diffBody, diffLine) {
             prevSection = section;
         }
 
-        if (!toSection && diffLine.offset.to > 0) {
+        if (!toSection && diffLine.offset.to > 0 && diffBody.to.sections.length > 0) {
             if (prevSection.heading) {
                 toSection = prevSection.heading;
             }
@@ -2205,14 +2195,14 @@ const overallCountsCache = {};
 function getCounts(req, res) {
     return getSignificantEvents(req, res).then( (response) => {
 
-        const snippetableEvents = response.timeline.filter(event => event.outputType === 'large-change');
+        const otherLargeChanges = response.timeline.filter(event => event.outputType === 'large-change');
         const smallEventsCount = response.timeline.filter(event => event.outputType === 'small-change').length;
-        const snippetableEventsCount = snippetableEvents.length;
+        const otherLargeChangesCount = otherLargeChanges.length;
         const newTalkPageTopicCount = response.timeline
             .filter(event => event.outputType === 'new-talk-page-topic').length;
         const vandalismRevertCount = response.timeline
             .filter(event => event.outputType === 'vandalism-revert').length;
-        const flatMappedSignificantChanges = snippetableEvents
+        const flatMappedSignificantChanges = otherLargeChanges
             .reduce((acc, x) => acc.concat(x.significantChanges), []);
         const addedTextCount = flatMappedSignificantChanges
             .filter(significantChange => significantChange.outputType === 'added-text').length;
@@ -2220,7 +2210,7 @@ function getCounts(req, res) {
             .filter(significantChange => significantChange.outputType === 'deleted-text').length;
         const newReferenceCount = flatMappedSignificantChanges
             .filter(significantChange => significantChange.outputType === 'new-template').length;
-        const significantEventCount = snippetableEventsCount +
+        const significantEventCount = otherLargeChangesCount +
             newTalkPageTopicCount +
             vandalismRevertCount;
 
@@ -2233,8 +2223,8 @@ function getCounts(req, res) {
             deletedTextCount : countsCache.deletedTextCount + deletedTextCount;
         countsCache.newReferenceCount = !countsCache.newReferenceCount ?
             newReferenceCount : countsCache.newReferenceCount + newReferenceCount;
-        countsCache.snippetableEventsCount = !countsCache.snippetableEventsCount ?
-            snippetableEventsCount : countsCache.snippetableEventsCount + snippetableEventsCount;
+        countsCache.otherLargeChangesCount = !countsCache.otherLargeChangesCount ?
+            otherLargeChangesCount : countsCache.otherLargeChangesCount + otherLargeChangesCount;
         countsCache.newTalkPageTopicCount = !countsCache.newTalkPageTopicCount ?
             newTalkPageTopicCount : countsCache.newTalkPageTopicCount + newTalkPageTopicCount;
         countsCache.vandalismRevertCount = !countsCache.vandalismRevertCount ?
@@ -2253,7 +2243,7 @@ function getCounts(req, res) {
     });
 }
 
-const countsTitles = ['Amy_Coney_Barrett', 'Bible'];
+const countsTitles = ['Raised_by_Wolves'];
 var currentCountsIndex = 0;
 
 function parentGetCounts(req, res) {
