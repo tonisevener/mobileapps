@@ -422,7 +422,7 @@ const snippetPromise = (req, preformattedSnippet) => {
             case 3: // Added and deleted words in line
 
                 if (preformattedSnippet.snippetHighlightRanges === null ||
-                preformattedSnippet.snippetHighlightRanges === undefined) {
+                    preformattedSnippet.snippetHighlightRanges === undefined) {
                     break;
                 }
 
@@ -707,7 +707,7 @@ function cleanupCache(req) {
     // cleanup article cache
     var domainDict = significantChangesCache[req.params.domain];
     const articleTitle = keyTitleForCache(req, null);
-        if (domainDict) {
+    if (domainDict) {
         var titleDict = domainDict[articleTitle];
         if (titleDict) {
             // eslint-disable-next-line no-restricted-properties
@@ -726,7 +726,7 @@ function cleanupCache(req) {
                         return outputTypeCountsTowardsCache(outputObject.outputType);
                     }
 
-                     return false;
+                    return false;
                 });
 
                 const delta = significantCachedObjects.length -
@@ -770,8 +770,8 @@ function cleanupCache(req) {
                             talkPageTitleArray.pop(); // remove maxedOut element
                             const sortedTalkPageTitleArray =
                                 talkPageTitleArray.sort(function(a, b) {
-                                return new Date(b.timestamp) - new Date(a.timestamp);
-                            });
+                                    return new Date(b.timestamp) - new Date(a.timestamp);
+                                });
 
                             for (var t = sortedTalkPageTitleArray.length - 1; t >= 0; t--) {
                                 const sortedTalkObjectToConsider = sortedTalkPageTitleArray[t];
@@ -844,10 +844,10 @@ function getSectionForDiffLine(diffBody, diffLine) {
 
     // safety
     if (!diffBody.from ||
-    !diffBody.from.sections ||
-    !diffBody.to ||
-    !diffBody.to.sections ||
-    !diffLine.offset) {
+        !diffBody.from.sections ||
+        !diffBody.to ||
+        !diffBody.to.sections ||
+        !diffLine.offset) {
         return null;
     }
 
@@ -897,7 +897,7 @@ function getSectionForDiffLine(diffBody, diffLine) {
             prevSection = section;
         }
 
-        if (!fromSection && diffLine.offset.from > 0) {
+        if (!fromSection && diffLine.offset.from > 0 && diffBody.from.sections.length > 0) {
             if (prevSection.heading) {
                 fromSection = prevSection.heading;
             }
@@ -920,7 +920,7 @@ function getSectionForDiffLine(diffBody, diffLine) {
             prevSection = section;
         }
 
-        if (!toSection && diffLine.offset.to > 0) {
+        if (!toSection && diffLine.offset.to > 0 && diffBody.to.sections.length > 0) {
             if (prevSection.heading) {
                 toSection = prevSection.heading;
             }
@@ -962,9 +962,9 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
             const diff = diffAndRevision.body.diff[d];
 
             if (diff.type === undefined ||
-            diff.type === null ||
-            diff.text === undefined ||
-            diff.text === null) {
+                diff.type === null ||
+                diff.text === undefined ||
+                diff.text === null) {
                 continue;
             }
 
@@ -994,8 +994,8 @@ function updateDiffAndRevisionsWithCharacterCount(diffAndRevisions) {
 
                         if (range.start === null ||
                             range.start === undefined ||
-                        range.length === null ||
-                        range.length === undefined) {
+                            range.length === null ||
+                            range.length === undefined) {
                             continue;
                         }
 
@@ -1057,9 +1057,9 @@ function templateNamesToCallOut() {
 function needsToParseForAddedTemplates(text, includeOpeningBraces) {
 
     if (text === undefined ||
-    text === null ||
-    includeOpeningBraces === undefined ||
-    includeOpeningBraces === null) {
+        text === null ||
+        includeOpeningBraces === undefined ||
+        includeOpeningBraces === null) {
         return false;
     }
 
@@ -1148,9 +1148,9 @@ function structuredTemplatePromise(text, diffItem, revision) {
                 }
             }
             const result = Object.assign( {
-               revision: revision,
+                revision: revision,
                 diffItem: diffItem,
-               templates: templateObjects
+                templates: templateObjects
             });
             resolve(result);
         });
@@ -1174,11 +1174,21 @@ function addStructuredTemplates(diffAndRevisions) {
         const diffAndRevision = diffAndRevisions[i];
 
         if (diffAndRevision.body === null ||
-        diffAndRevision.body === undefined ||
-        diffAndRevision.body.diff === null ||
-        diffAndRevision.body.diff === undefined ||
+            diffAndRevision.body === undefined ||
+            diffAndRevision.body.diff === null ||
+            diffAndRevision.body.diff === undefined ||
             diffAndRevision.revision === null ||
             diffAndRevision.revision === undefined) {
+            continue;
+        }
+
+        const addedLinesCount = diffAndRevision.body.diff.filter(diffItem => diffItem.type === 1)
+            .length;
+        if (addedLinesCount > 500) {
+            // This suggests some sort of mass change that would be too much work on the server
+            // to parse for templates.
+            // bypassing template detection in this case.
+            // this may be a good metric to tweak to boost performance
             continue;
         }
 
@@ -1234,7 +1244,7 @@ function addStructuredTemplates(diffAndRevisions) {
                                         // grab following '}}' to capture edge case templates
                                         const nextTwoCharacters = binaryText
                                             .substring(previousRangeEndIndex,
-                                            previousRangeEndIndex + 2);
+                                                previousRangeEndIndex + 2);
                                         if (nextTwoCharacters === '}}') {
                                             previousBinaryRangeText += '}}';
                                         }
@@ -1302,30 +1312,30 @@ function addStructuredTemplates(diffAndRevisions) {
     return Promise.all(promises)
         .then( (response) => {
 
-           // loop through responses, add to revision.
+            // loop through responses, add to revision.
 
             diffAndRevisions.forEach( (diffAndRevision) => {
 
                 var templatesAndDiffItems = [];
                 response.forEach( (item) => {
 
-                   if (item.revision !== null &&
-                   item.revision !== undefined &&
-                   diffAndRevision.revision !== null &&
-                   diffAndRevision.revision !== undefined &&
-                   item.templates !== null &&
-                   item.templates !== undefined &&
-                   item.templates.length > 0) {
-                       if (item.revision.revid === diffAndRevision.revision.revid) {
-                           const templateAndDiffItem = Object.assign({
-                               templates: item.templates,
-                               diffItem: item.diffItem
-                           });
+                    if (item.revision !== null &&
+                        item.revision !== undefined &&
+                        diffAndRevision.revision !== null &&
+                        diffAndRevision.revision !== undefined &&
+                        item.templates !== null &&
+                        item.templates !== undefined &&
+                        item.templates.length > 0) {
+                        if (item.revision.revid === diffAndRevision.revision.revid) {
+                            const templateAndDiffItem = Object.assign({
+                                templates: item.templates,
+                                diffItem: item.diffItem
+                            });
 
-                           templatesAndDiffItems.push(templateAndDiffItem);
-                       }
-                   }
-               });
+                            templatesAndDiffItems.push(templateAndDiffItem);
+                        }
+                    }
+                });
 
                 diffAndRevision.templatesAndDiffItems = templatesAndDiffItems;
             });
@@ -1346,9 +1356,9 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
         const diffAndRevision = talkDiffAndRevisions[index];
 
         if (diffAndRevision.revision === null ||
-        diffAndRevision.revision === undefined ||
-        diffAndRevision.revision.comment === null ||
-        diffAndRevision.revision.comment === undefined ||
+            diffAndRevision.revision === undefined ||
+            diffAndRevision.revision.comment === null ||
+            diffAndRevision.revision.comment === undefined ||
             diffAndRevision.revision.userid === null ||
             diffAndRevision.revision.userid === undefined ||
             diffAndRevision.revision.tags === null ||
@@ -1387,7 +1397,7 @@ function getNewTopicDiffAndRevisions(talkDiffAndRevisions) {
 
 function getAllChangedDiffLines(diffBody) {
     const allChangedDiffLines = diffBody.diff.filter((item) => {
-       return item.type !== 0;
+        return item.type !== 0;
     });
     return allChangedDiffLines;
 }
@@ -1404,7 +1414,7 @@ function getLargestDiffLine(diffBody) {
     diffBody.diff.sort(function(a, b) {
 
         if (b.characterChange === null ||
-        b.characterChange === undefined ||
+            b.characterChange === undefined ||
             a.characterChange === null ||
             a.characterChange === undefined) {
             return 0;
@@ -1463,7 +1473,7 @@ function textContainsEmptyLineOrSection(text) {
 function textContainsTemplate(text) {
 
     if (text === null ||
-    text === undefined) {
+        text === undefined) {
         return false;
     }
 
@@ -1505,7 +1515,7 @@ function getFirstDiffLineWithContent(diffBody) {
 function sortOutput(output) {
 
     if (output === null ||
-    output === undefined) {
+        output === undefined) {
         return null;
     }
 
@@ -1513,9 +1523,9 @@ function sortOutput(output) {
     return output.sort(function(a, b) {
 
         if (b.timestamp === null ||
-        b.timestamp === undefined ||
-        a.timestamp === null ||
-        a.timestamp === undefined) {
+            b.timestamp === undefined ||
+            a.timestamp === null ||
+            a.timestamp === undefined) {
             return 0;
         }
 
@@ -1526,7 +1536,7 @@ function sortOutput(output) {
 function cleanOutput(output) {
 
     if (output === null ||
-    output === undefined) {
+        output === undefined) {
         return null;
     }
 
@@ -1537,7 +1547,7 @@ function cleanOutput(output) {
         const item = output[i];
 
         if (item.outputType === null ||
-        item.outputType === undefined) {
+            item.outputType === undefined) {
             continue;
         }
 
@@ -1558,7 +1568,7 @@ function cleanOutput(output) {
 function editCountsAndGroupsPromise(req, cleanedOutput) {
 
     if (cleanedOutput === undefined ||
-    cleanedOutput === null) {
+        cleanedOutput === null) {
         return null;
     }
 
@@ -1578,11 +1588,11 @@ function editCountsAndGroupsPromise(req, cleanedOutput) {
             // distribute results back into cleanedOutput
 
             if (response.body === null ||
-            response.body === undefined ||
-            response.body.query === null ||
-            response.body.query === undefined ||
-            response.body.query.users === null ||
-            response.body.query.users === undefined) {
+                response.body === undefined ||
+                response.body.query === null ||
+                response.body.query === undefined ||
+                response.body.query.users === null ||
+                response.body.query.users === undefined) {
                 cleanedOutput.forEach( (outputItem) => {
                     if (outputItem.outputType !== 'small-change') {
                         outputItem.userGroups = null;
@@ -1597,9 +1607,9 @@ function editCountsAndGroupsPromise(req, cleanedOutput) {
                 cleanedOutput.forEach( (outputItem) => {
 
                     if (outputItem.userid !== null &&
-                    outputItem.userid !== undefined &&
-                    user.userid !== null &&
-                    user.userid !== undefined) {
+                        outputItem.userid !== undefined &&
+                        user.userid !== null &&
+                        user.userid !== undefined) {
                         if (outputItem.userid === user.userid) {
                             outputItem.userGroups = user.groups;
                             outputItem.userEditCount = user.editcount;
@@ -1622,7 +1632,7 @@ function isRequestingFirstPage(req) {
 function shaFromSortedOutput(req, sortedOutput) {
 
     if (sortedOutput === null ||
-    sortedOutput === undefined) {
+        sortedOutput === undefined) {
         return null;
     }
 
@@ -1707,13 +1717,13 @@ function getSignificantEvents(req, res) {
             // talk page revisions
 
             if (response.body === undefined ||
-            response.body === null ||
-            response.body.query === undefined ||
-            response.body.query === null ||
-            response.body.query.pages === undefined ||
-            response.body.query.pages === null ||
-            response.body.query.pages[0] === undefined ||
-            response.body.query.pages[0] === null ||
+                response.body === null ||
+                response.body.query === undefined ||
+                response.body.query === null ||
+                response.body.query.pages === undefined ||
+                response.body.query.pages === null ||
+                response.body.query.pages[0] === undefined ||
+                response.body.query.pages[0] === null ||
                 response.body.query.pages[0].revisions === undefined ||
                 response.body.query.pages[0].revisions === null) {
                 throw new MalformedArticleRevisionResponse();
@@ -1730,7 +1740,8 @@ function getSignificantEvents(req, res) {
             if (isMaxedOut && cutoff && cutoff.earliestTimestamp) {
                 filteredRevisions = revisions.filter((revision) => {
                     if (revision.timestamp === undefined || revision.timestamp === null ||
-                    cutoff.earliestTimestamp === undefined || cutoff.earliestTimestamp === null) {
+                        cutoff.earliestTimestamp === undefined ||
+                        cutoff.earliestTimestamp === null) {
                         return 0;
                     }
                     return new Date(revision.timestamp) > new Date(cutoff.earliestTimestamp);
@@ -1771,7 +1782,8 @@ function getSignificantEvents(req, res) {
                 const earliestRevision = filteredRevisions[filteredRevisions.length - 1];
                 const latestRevision = filteredRevisions[0];
                 if (earliestRevision.parentid !== null && earliestRevision.parentid !== undefined
-                && latestRevision.timestamp !== null && latestRevision.timestamp !== undefined) {
+                    && latestRevision.timestamp !== null &&
+                    latestRevision.timestamp !== undefined) {
                     nextRvStartId = earliestRevision.parentid;
                     // if rvstartid is missing from query, they are fetching the first page
                     // if they are fetching the first page, we don't want to block of
@@ -1808,8 +1820,8 @@ function getSignificantEvents(req, res) {
                 response.articleDiffAndRevisions !== null) {
                 const articleDiffAndRevisionsNullDiff =
                     response.articleDiffAndRevisions.filter(diffAndRevision => {
-                    return diffAndRevision.body === undefined || diffAndRevision.body === null;
-                });
+                        return diffAndRevision.body === undefined || diffAndRevision.body === null;
+                    });
 
                 if (articleDiffAndRevisionsNullDiff.length ===
                     response.articleDiffAndRevisions.length &&
@@ -1905,14 +1917,12 @@ function getSignificantEvents(req, res) {
 
                 if (revision.tags !== undefined && revision.tags !== null &&
                     revision.tags.includes('mw-rollback') &&
-                    revision.comment !== undefined || revision.comment !== null &&
-                    revision.comment.toLowerCase().includes('revert') &&
-                    revision.comment.toLowerCase().includes('vandalism') &&
+                    (revision.comment !== undefined && revision.comment !== null) &&
+                    (revision.comment.toLowerCase().includes('revert') ||
+                        revision.comment.toLowerCase().includes('vandalism')) &&
                     diffAndRevision.body !== null && diffAndRevision.body !== undefined) {
-                    const allChangedDiffLines = getAllChangedDiffLines(diffAndRevision.body);
-                    const sections = allChangedDiffLines.map(diffLine =>
-                        getSectionForDiffLine(diffAndRevision.body,
-                        diffLine));
+                    const sections = diffAndRevision.characterChangeWithSections.addedSections
+                        .concat(diffAndRevision.characterChangeWithSections.deletedSections);
                     const dedupedSections = new Set(sections);
                     const vandalismRevertOutputObject = new VandalismOutput(revision.revid,
                         revision.parentid, revision.timestamp, revision.user, revision.userid,
@@ -1945,7 +1955,7 @@ function getSignificantEvents(req, res) {
                         const dedupedSections = new Set(sections);
                         const newReferenceOutputObject =
                             new NewReferenceOutput(Array.from(dedupedSections),
-                            combinedTemplates);
+                                combinedTemplates);
                         significantChanges.push(newReferenceOutputObject);
                     }
 
