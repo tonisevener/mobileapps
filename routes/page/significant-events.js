@@ -544,11 +544,16 @@ const snippetPromise = (req, preformattedSnippet) => {
                 // all lines truncate at the last highlight end line and suffix with ...
                 // regardless if
                 // it's the last thing in the snippet.
-                truncatedSnippet = truncatedSnippet.slice(0, lastStart + 'ioshighlightend'.length);
-                truncatedSnippet = truncatedSnippet.concat('...');
+                var newTruncatedSnippet = truncatedSnippet.slice(0, lastStart + 'ioshighlightend'.length);
+                newTruncatedSnippet = newTruncatedSnippet.concat('...');
                 if (firstStart > 0) {
-                    truncatedSnippet = truncatedSnippet.slice(firstStart);
-                    truncatedSnippet = '...'.concat(truncatedSnippet);
+                    newTruncatedSnippet = newTruncatedSnippet.slice(firstStart);
+                    newTruncatedSnippet = '...'.concat(newTruncatedSnippet);
+                }
+
+                const minLengthForTruncation = 'ioshighlightstart'.length + 'ioshighlightend'.length + '...'.length + '...'.length + 20;
+                if (newTruncatedSnippet.length > minLengthForTruncation) {
+                    truncatedSnippet = newTruncatedSnippet;
                 }
 
                 // UNCOMMENT THIS LINE IF HIGHLIGHTING IS NOT WORTH IT
