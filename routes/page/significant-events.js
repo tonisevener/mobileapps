@@ -838,6 +838,10 @@ function getSummaryText(req) {
     });
 }
 
+function textWithHtmlCommentsStripped(text) {
+    return text.replace(/<!--[\s\S]*?(?:-->)/g, '');
+}
+
 function getSectionForDiffLine(diffBody, diffLine) {
 
     if (!diffBody || !diffLine) {
@@ -881,9 +885,9 @@ function getSectionForDiffLine(diffBody, diffLine) {
 
     if (fromSection && toSection) {
         if (diffLine.offset.to && diffLine.offset.to.length > 0) {
-            return toSection;
+            return textWithHtmlCommentsStripped(toSection);
         } else {
-            return fromSection;
+            return textWithHtmlCommentsStripped(fromSection);
         }
     }
 
@@ -934,9 +938,9 @@ function getSectionForDiffLine(diffBody, diffLine) {
 
     if (diffLine.offset.to || diffLine.offset.to === 0) {
         // 0 is a valid value, but without explicit check JS sees it as invalid
-        return toSection;
+        return textWithHtmlCommentsStripped(toSection);
     } else {
-        return fromSection;
+        return textWithHtmlCommentsStripped(fromSection);
     }
 }
 
