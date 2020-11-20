@@ -839,6 +839,11 @@ function getSummaryText(req) {
 }
 
 function textWithHtmlCommentsStripped(text) {
+
+    if (text === null || text === undefined) {
+        return null;
+    }
+
     return text.replace(/<!--[\s\S]*?(?:-->)/g, '');
 }
 
