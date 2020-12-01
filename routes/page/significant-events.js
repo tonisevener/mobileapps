@@ -211,8 +211,7 @@ class PreformattedSnippet {
 }
 
 function getThreshold(req) {
-    return req.query.threshold === null || req.query.threshold === undefined ?
-        100 : req.query.threshold;
+    return 100;
 }
 
 function insertSubstringInString(originalString, substring, index) {
@@ -2190,12 +2189,39 @@ function getSignificantEvents(req, res) {
                 sha: response.sha,
                 timeline: response.cleanedOutput,
                 summary: summary });
-            res.send(result).end();
+            return result;
         });
 }
 
 router.get('/page/significant-events/:title', (req, res) => {
-    return getSignificantEvents(req, res);
+    return getSignificantEvents(req, res).then( (response) => {
+        res.send(response).end();
+    });
+});
+
+var countCacheWarmupPages = 0;
+
+function recursiveGetSignificantEvents(req, res) {
+    countCacheWarmupPages++;
+    return getSignificantEvents(req, res).then( (response) => {
+
+        if (!response.nextRvStartId) {
+            const finalWarmupCount = countCacheWarmupPages;
+            countCacheWarmupPages = 0;
+            return Object.assign({ warmedPages: finalWarmupCount,
+                                    significantChangesCache: significantChangesCache });
+        }
+
+        req.query.rvstartid = response.nextRvStartId;
+        return recursiveGetSignificantEvents(req, res);
+    });
+}
+
+router.get('/page/significant-events-warmup/:title', (req, res) => {
+    return recursiveGetSignificantEvents(req, res)
+        .then( (response) => {
+             res.send(response).end();
+        });
 });
 
 module.exports = function(appObj) {
